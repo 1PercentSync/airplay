@@ -1,2 +1,5 @@
 target/
 .cargo-home/
+reference/
+research/references/*
+!research/references/REFERENCES.md
