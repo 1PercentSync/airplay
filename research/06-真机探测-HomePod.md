@@ -14,7 +14,7 @@
 | **transient 配对** | **pair_ok（HAMK 校验通过）** | 决策 E 主线成立；PIN pair-setup 应急预案继续封存 |
 | supportedFormats.audioStream | 0x1440800 | realtime 广告仅含 0x40000（44.1/16/2）= 我们四格式中唯一；48k/24bit **未广告** → 决策 C 基线 44.1/16/2 被设备确认，hi-res 对 realtime 不适用 |
 | supportedAudioFormatsExtended | 仅 bufferStream（34 项 codec 枚举） | 与 buffered 放弃决策一致，不利用 |
-| keepAliveSendStatsAsBody | true | **保活要求**：/feedback 需携带统计 body（plist）——会话层实现时按 airplay-cli 的 keepalive-stats 格式执行 |
+| keepAliveSendStatsAsBody | true | 设备广告支持统计 body；但 pyatv/owntone 均以**空 body** /feedback 真机服役 `[代码: pyatv support/rtsp.py:246; owntone airplay.c:3701]` → 空 body 起步，统计 body 为可选增强 |
 | initialVolume | -26.25 dB | 接收端初始音量 |
 | volumeControlType | 3 | SET_PARAMETER 绝对音量可用 |
 | senderAddress | 192.168.1.100 | 用户 PC 与 HomePod 同子网 |
@@ -42,24 +42,24 @@
 
 **根因**：`derive_keys` 曾将 64 字节 SRP K 截断为 32 字节作为 HKDF IKM。
 
-**证据三方会审**：
-- airplay-cli `ap2_hap.c:1172-1180`：控制通道 HKDF IKM = **完整 64B**（注释 "matching pair_ap/owntone"）
-- owntone `airplay.c:1443` + `airplay_events.c:150`：控制与事件通道 IKM 均为完整 64B；`shk` = K[..32]
+**证据会审（清理后）**：
+- owntone `airplay.c:1443`（注释明示 transient 密钥 64B）+ `airplay_events.c:150`：控制与事件通道 IKM 均为完整 64B；`shk` = K[..32]
 - pyatv `hap_transient.py encryption_keys`：控制+事件均用完整 64B
-- 孤例：airplay-cli MRP 侧车（`ap2_mrp.c:1409`）事件通道用 32B——与自家 ap2_hap.c 不一致，疑为其 transient+MRP 路径潜伏 bug
+- 真机实证：修正后加密 GET /info 成功（见上）
+- （原第三方佐证材料 airplay-cli 已作为不可信移除，结论由两家 A 级 + 真机充分支撑）
 
 **修正**：控制+事件密钥 IKM = 完整 64B SRP K；audio_key = K[..32]。mock 集成测试已同步对齐真机约定。
 
 ---
 
-## 2026-08-12 里程碑②真机迭代 #2：计时服务必须在流 SETUP 前就绪（已修）
+## 2026-08-12 里程碑②真机迭代 #2：计时服务须在流 SETUP 前就绪（已修，但非卡点根因）
 
 **现象**：加密 GET /info ✓ → session SETUP ✓（event_port 下发）→ RECORD ✓ → **流 SETUP 无响应**（接收端沉默）；随后的重连在 M1 短暂被拒（HomePod 清理悬挂会话，数秒后自愈）。
 
-**根因**：宣告 `timingProtocol: NTP` + timingPort 后，接收端在流 SETUP 前后即需要与发送端完成时钟同步；我们的 NTP timing server 原在 establish() 完成后才启动 → 死锁。
+**根因（部分）**：宣告 `timingProtocol: NTP` + timingPort 后，接收端在流 SETUP 前后即需要与发送端完成时钟同步；我们的 NTP timing server 原在 establish() 完成后才启动。
 
-**证据**：airplay-cli `ap2_client.c:1790-1811`（timing service 在 session SETUP 之前启动）；FXChainPlayer STARTPLAYING 序列（firstSync 先于 sendSessionSetup）；pyatv 用 `timingProtocol: None` 故无此约束（我们不采用 None——实时流需要时间锚定）。
+**证据**：owntone 计时服务常驻、先于一切会话启动 `[代码: owntone airplay.c:4314 service_start]`。
 
-**修正**：`establish()` 绑定 timing socket 后立即 spawn timing server；AbortOnDrop 守卫保证 establish 失败路径不泄漏任务；`Session.timing_replies` 计数器供诊断；run/mock 测试去掉了重复启动。
+**修正**：`establish()` 绑定 timing socket 后立即 spawn timing server。
 
-**次要观察**：establish 失败遗留的悬挂会话会让 HomePod 在数秒内拒绝新配对（M1 超时），退避重连可自愈——暂不加显式 TEARDOWN。
+**结果（诚实记录）**：**修复后真机重测仍为流 SETUP 无响应**——该修正是必要非充分条件；卡点根因未定位（候选方向：plist 字段差异、事件通道应答、Windows 防火墙拦截入站 UDP 计时请求），留待重写后按 `07-参考清理.md` 的待验清单继续。
