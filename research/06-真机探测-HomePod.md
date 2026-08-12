@@ -31,7 +31,7 @@
 
 - 流格式：ALAC 44.1kHz/16bit/2ch，spf=352（唯一广告 realtime 格式）；
 - 计时：NTP 先行（PTP 支持在位但按决策备用）；
-- 保活：POST /feedback ~2s + 统计 body（keepAliveSendStatsAsBody=true）+ 事件通道全程服务；
+- 保活：POST /feedback ~2s **空 body**（统计 body 为可选增强，见上表）+ 事件通道全程服务；
 - SETUP 音量：初始 SET_PARAMETER 可按 initialVolume 附近设置。
 
 ---
