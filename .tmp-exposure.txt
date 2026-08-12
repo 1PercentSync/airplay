@@ -1,0 +1,65 @@
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay2-rs-pabldi08\nfor c in airplay-client airplay-pairing airplay-rtsp airplay-audio airplay-timing airplay-crypto 
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay2-rs-pabldi08\ngrep -n \"event_port\\|eventPort\\|event_channel\\|feedback\\|POST /command\\|/command\" crates/a
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay2-rs-pabldi08\ngrep -rn \"command\\|Events-\\|event_in\\|event_out\" crates/airplay-client/src/connection.rs | h
+edit :: {"edits":[{"newText":"| airplay2-rs (jburnhams) | github.com/jburnhams/airplay2-rs | 527884f916d5860e39ab54b5cd272ba700f270bc | 4 | 2026-05-04 | Rust AirPlay 2 库，较新
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos\ngit clone --quiet --depth 1 https://github.com/music-assistant/airplay-cli airplay-cli 2>&1\necho \"airplay-cli|$(git 
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli\nwc -l DESIGN.md TODO.md README.md 2>/dev/null; echo \"=== DESIGN.md 目录结构 ===\"; grep -n \"^#\\|^##
+read :: {"limit":135,"offset":68,"path":"/mnt/d/Github/airplay/reference/repos/airplay-cli/DESIGN.md"}
+read :: {"limit":125,"offset":539,"path":"/mnt/d/Github/airplay/reference/repos/airplay-cli/DESIGN.md"}
+read :: {"limit":130,"offset":793,"path":"/mnt/d/Github/airplay/reference/repos/airplay-cli/DESIGN.md"}
+read :: {"limit":100,"offset":923,"path":"/mnt/d/Github/airplay/reference/repos/airplay-cli/DESIGN.md"}
+read :: {"limit":58,"offset":28,"path":"/mnt/d/Github/airplay/reference/repos/airplay-cli/DESIGN.md"}
+bash :: {"command":"cat /mnt/d/Github/airplay/reference/repos/airplay-cli/TODO.md; echo \"=== 代码中的 transient/HomePod/PIN 相关 ===\"; cd /mnt/d/Github/airplay/reference/re
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\nsed -n '620,700p' ap2_client.c; echo \"=== 1290-1330 ===\"; sed -n '1290,1330p' ap2_client.c"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli\ngrep -n -i \"homepod\\|pin\\b\\|pair\" README.md | head -30"}
+tavily_tavily_search :: {"max_results":6,"query":"Music Assistant AirPlay HomePod pairing PIN credentials airplay-cli"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\nsed -n '1255,1295p' ap2_client.c; echo \"=== ap2_hap.c transient 完成处上下文 ===\"; sed -n '118
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay2-rs-pabldi08\ngrep -n \"connect_with_pin\\|pair_verify\\|pair_setup\\|transient\\|0x10\\|Flags\" crates/airplay
+write :: {"content":"# 研究笔记 03：协议调研第二轮（查漏）\n\n> 承接 `02-协议调研.md`。第二轮新增最重要参考：**music-assistant/airplay-cli**（统
+edit :: {"edits":[{"newText":"| rust-raop-player | github.com/LinusU/rust-raop-player | c00676aeb44673e09dd3d25a4928409eb7df6322 | 32 | 2025-11-01 | Rust，RAOP v2 发送（带同�
+bash :: {"command":"cat >> /mnt/d/Github/airplay/research/02-协议调研.md << 'EOF'\n- **2026-08-12 决策 C 修订（用户批准）**：默认 44.1kHz/16bit/立体声保底；�
+write :: {"content":"# 研究笔记 04：音频捕获调研（阶段二）\n\n> 证据标记同前。Sunshine 参考：`reference/repos/Sunshine` @ cf52f4b6。\n\n## 1. Q4：Sunshi
+write :: {"content":"# 架构设计\n\n> 本文档是当前架构设计，随实现演进同步更新（代码变动时检查本文档）。\n> 需求见 `REQUIREMENTS.zh-CN.md`（
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\nsed -n '60,120p' ap2_hap.c; echo \"=== SRP helpers ===\"; sed -n '312,420p' ap2_hap.c"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\nsed -n '420,500p' ap2_hap.c"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\nsed -n '540,610p' ap2_hap.c; echo \"=== GET /info 请求 ===\"; grep -n -B2 -A20 '\"/info\"' ap2_clien
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\ngrep -n -A30 \"ap2_rtsp_write_request\" ap2_io.c | head -45; echo \"=== 格式表解析 ===\"; grep -n
+write :: {"content":"//! Core shared types: device model, audio formats, stream configuration.\n//!\n//! Protocol facts are annotated with evidence references in the form\n//! `[ev
+write :: {"content":"//! TLV8 (Type-Length-Value, 8-bit type & length) used by HAP pairing.\n//!\n//! Values longer than 255 bytes are split into consecutive entries with the\n//! 
+write :: {"content":"//! SRP-6a client (3072-bit group, SHA-512) for HAP pair-setup.\n//!\n//! Byte conventions follow the HAP variant exactly:\n//!   k = SHA512(PAD(N) ‖ PAD(g))
+write :: {"content":"//! Minimal binary plist (bplist00) codec.\n//!\n//! Decoder covers the full object type set; encoder covers the subset we\n//! emit (dict/array/string/int/rea
+write :: {"content":"//! Plaintext RTSP-over-TCP client (pre-pairing phase + probe).\n//!\n//! Request/response shape and header set:\n//! [evidence: airplay-cli/src/ap2_hap.c:554-
+write :: {"content":"//! Transient pair-setup (HKP 4): fixed PIN \"3939\", SRP-6a, M1→M2→M3→M4.\n//!\n//! M1: {Method: 0, State: 1, Flags: 0x10} with `X-Apple-HKP: 4`\n//! M3
+write :: {"content":"//! `/info` bplist parsing and capability summary.\n//!\n//! Capability interpretation (features/statusFlags bit semantics):\n//! [evidence: research/02-协议
+write :: {"content":"# 研究笔记 06：真机探测事实（HomePod gen 2，192.168.1.12）\n\n> 2026-08-12，用户真机执行 `probe` 三件套的全部结论。后续会话�
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\ngrep -n -B3 -A30 \"feedback\" ap2_client.c | grep -B3 -A30 \"keepalive\\|stats\" | head -60"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\ngrep -n -B5 -A35 \"ap2_send_feedback\\|feedback_body\\|build.*feedback\" ap2_client.c | sed -n '1,60p'
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos/airplay-cli/src\ngrep -n '\"/feedback\"' ap2_client.c | head; grep -n -B8 -A25 'POST\", \"/feedback\"' ap2_client.c | h
+write :: {"content":"//! RTSP client: plaintext phase (pairing/probe) + encrypted control channel\n//! (post-pairing), sharing one request builder and response parser.\n//!\n//! Wi
+write :: {"content":"//! AP2 session orchestration: GET /info → session SETUP (NTP) → event\n//! channel → RECORD → stream SETUP → keepalive + volume.\n//!\n//! Sequence 
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos\necho \"=== ap2_client: 共享密钥如何变成 32 字节并喂给 HKDF ===\"\ngrep -n \"sharedKey\\|shared_key\\|deri
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos\ngrep -rn \"Control-Salt\" airplay-cli/src/*.c airplay-cli/src/*.h | head -5\ngrep -rn \"HKDF\\|hkdf\" airplay-cli/src/
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && sed -n '1000,1045p' airplay-cli/src/ap2_hap.c"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && sed -n '1160,1215p' airplay-cli/src/ap2_hap.c"}
+edit :: {"edits":[{"newText":"/// [evidence: airplay-cli/src/ap2_hap.c:1172-1190] — HKDF input is the\n/// FULL 64-byte SRP session key (\"matching pair_ap/owntone\"); the audio 
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n \"Events-Salt\\|events\" airplay-cli/src/ap2_client.c | grep -i \"salt\\|key\\|derive\" | head -8; echo ---;
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -rn \"Events-Salt\" airplay-cli/src/*.c airplay-cli/src/*.h | head -6"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n -B8 -A20 \"MRP_EVENTS_SALT\" airplay-cli/src/ap2_mrp.c | head -50"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n -B3 -A8 \"shared_secret\" airplay-cli/src/ap2_mrp.c | grep -n -A8 \"memcpy\\|have_secret = true\\|set_secret
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n -B4 -A10 \"reuse_shared_secret\" airplay-cli/src/ap2_mrp.c | sed -n '1,30p'; echo \"=== 谁调用 mrp 并传
+bash :: {"command":"cd /mnt/d/Github/airplay && cat >> research/06-真机探测-HomePod.md << 'EOF'\n\n---\n\n## 2026-08-12 里程碑②真机迭代 #1：HKDF IKM 宽度 bug（已�
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n -B3 -A12 \"timing\" airplay-cli/src/ap2_client.c | grep -B3 -A12 \"timing_start\\|start_timing\\|timing thre
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n \"NTP\\|ntp\\|ap2_ntp\" airplay-cli/src/ap2_client.c | grep -in \"start\\|init\\|create\\|record\\|before\\|
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n \"timing_port = \\|bind.*timing\\|timing.*bind\\|SOCK_DGRAM\" airplay-cli/src/ap2_client.c | head -8; sed -n
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n \"timing_sock\\|timing_listen\\|ntp_sock\\|ap2_timing_\\|timing_port\" airplay-cli/src/ap2_client.c | head -
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && sed -n '1790,1860p' airplay-cli/src/ap2_client.c"}
+edit :: {"edits":[{"newText":"use tokio::net::UdpSocket;\nuse tokio::sync::{broadcast, mpsc, watch, Mutex};","oldText":"use tokio::net::UdpSocket;\nuse tokio::sync::{broadcast, wat
+edit :: {"edits":[{"newText":"/// Task guard: aborts spawned tasks if establish() bails out early.\nstruct AbortOnDrop(Vec<JoinHandle<()>>);\n\nimpl Drop for AbortOnDrop {\n    fn 
+bash :: {"command":"cd /mnt/d/Github/airplay && cat >> research/06-真机探测-HomePod.md << 'EOF'\n\n---\n\n## 2026-08-12 里程碑②真机迭代 #2：计时服务必须在流 S
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && grep -n -B5 -A45 '\"streams\"' airplay-cli/src/ap2_client.c | sed -n '1,70p'"}
+bash :: {"command":"cd /mnt/d/Github/airplay/reference/repos && sed -n '1913,1969p' airplay-cli/src/ap2_client.c"}
+bash :: {"command":"cd /mnt/d/Github/airplay && grep -n \"airplay-cli\" research/references/REFERENCES.md | head -3; du -sh reference/repos/airplay-cli 2>/dev/null; ls reference/re
+bash :: {"command":"cd /mnt/d/Github/airplay && rm -rf reference/repos/airplay-cli && ls reference/repos/ | grep -c . && echo \"--- airplay-cli 已删除\""}
+bash :: {"command":"cd /mnt/d/Github/airplay && git add research docs reference && git commit -m \"research: 调研档案、架构设计、参考实现快照\n\n- research/: 协议
+bash :: {"command":"cd /mnt/d/Github/airplay && printf 'target/\\n.cargo-home/\\nreference/\\n' > .gitignore && git add .gitignore research docs && git commit -m \"research: 调研
+bash :: {"command":"cd /mnt/d/Github/airplay && jq -rc 'select(.type==\"message\") | .message.content[]? | select(.type==\"toolCall\") | (.name + \" :: \" + ((.arguments // .input 
