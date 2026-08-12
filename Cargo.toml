@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["app", "crates/airplay-core", "crates/airplay-crypto", "crates/airplay-rtsp", "crates/airplay-stream", "crates/audio-pipe"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

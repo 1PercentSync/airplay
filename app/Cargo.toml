@@ -1,0 +1,30 @@
+[package]
+name = "airplay"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "airplay"
+path = "src/main.rs"
+
+[dependencies]
+airplay-core = { path = "../crates/airplay-core" }
+airplay-rtsp = { path = "../crates/airplay-rtsp" }
+airplay-crypto = { path = "../crates/airplay-crypto" }
+airplay-stream = { path = "../crates/airplay-stream" }
+audio-pipe = { path = "../crates/audio-pipe" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
