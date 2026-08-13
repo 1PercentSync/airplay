@@ -66,6 +66,7 @@ fn process_loop(ring: Arc<SampleRing>, packets: Arc<PacketQueue>) -> airplay_cor
         match &mut resampler {
             None => {
                 if ring.pop_stereo_frames(FRAMES_PER_PACKET, &mut in_buf) == FRAMES_PER_PACKET {
+                    apply_endpoint_gain(&ring, &mut in_buf[..FRAMES_PER_PACKET * 2]);
                     packets.push(tpdf_packet(&mut rng, &in_buf[..FRAMES_PER_PACKET * 2]));
                 } else {
                     thread::sleep(Duration::from_millis(4));
@@ -77,6 +78,7 @@ fn process_loop(ring: Arc<SampleRing>, packets: Arc<PacketQueue>) -> airplay_cor
                     thread::sleep(Duration::from_millis(4));
                     continue;
                 }
+                apply_endpoint_gain(&ring, &mut in_buf[..need * 2]);
                 let input = InterleavedSlice::new(&in_buf[..need * 2], 2, need)
                     .map_err(|e| airplay_core::Error::Audio(format!("adapter in: {e:?}")))?;
                 let owned = rs
@@ -119,6 +121,16 @@ impl XorShift64 {
         let a = (self.next_u32() >> 16) as f32 / 65535.0;
         let b = (self.next_u32() >> 16) as f32 / 65535.0;
         a - b
+    }
+}
+
+fn apply_endpoint_gain(ring: &SampleRing, samples: &mut [f32]) {
+    let g = ring.endpoint_gain();
+    if (g - 1.0).abs() < 1e-4 {
+        return;
+    }
+    for s in samples {
+        *s *= g;
     }
 }
 

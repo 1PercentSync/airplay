@@ -13,7 +13,7 @@
 | 架构设计文档 | ✅ | `docs/架构设计.md` |
 | 里程碑 ① 探针 CLI | ✅ 2026-08-13 Windows 真机（含加密 `/info`） | 重写后的 `crates/` 探针：`devices_ok count=3`、`discover_ok count=1`、`info_ok`（body 2009）、`pair_ok`（HAMK，`session_key_len=64`）、`channel_ok`（同连接加密 `GET /info`，body 2009）。日志见 `06`。 |
 | 里程碑 ② 可播放 CLI | ✅ 2026-08-13 Windows 真机出声 | `airplay run 192.168.1.12`：流 SETUP 先于 RECORD，ALAC `ct=2`，`rtp_10s≈1252`，`q_drop=0`，TEARDOWN 200。用户确认 HomePod 出声。日志见 `06`。 |
-| 里程碑 ③ 托盘 GUI | ⏳ | — |
+| 里程碑 ③ 托盘 GUI | 2026-08-13 Windows 真机已跑 | 无参数启动托盘：配对/SETUP/RTP/TEARDOWN 200。用户确认托盘调 HomePod 音量和系统音量都有用。Steam 虚拟声卡 `QueryHardwareSupport mask=0`，不再二次乘端点标量。断流重连未在日志里出现过。 |
 
 ## 决策快照
 

@@ -20,14 +20,129 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tokio::time::{interval, Instant};
 use tracing::{info, warn};
 
 const BPLIST: &str = "application/x-apple-binary-plist";
 
+#[derive(Clone)]
+pub struct SessionCtrl {
+    pub stop: watch::Sender<bool>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub volume: watch::Sender<f64>,
+}
+
+impl SessionCtrl {
+    pub fn new(volume: f64) -> (Self, watch::Receiver<bool>, watch::Receiver<f64>) {
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let (vol_tx, vol_rx) = watch::channel(volume.clamp(0.0, 1.0));
+        (
+            Self {
+                stop: stop_tx,
+                volume: vol_tx,
+            },
+            stop_rx,
+            vol_rx,
+        )
+    }
+
+    pub fn request_stop(&self) {
+        let _ = self.stop.send(true);
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn set_volume(&self, v: f64) {
+        let _ = self.volume.send(v.clamp(0.0, 1.0));
+    }
+}
+
 pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
-    println!("[STATUS] probing");
+    let (ctrl, stop_rx, vol_rx) = SessionCtrl::new(0.5);
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        ctrl.request_stop();
+    });
+    run_session(
+        target,
+        device_hint,
+        0.5,
+        stop_rx,
+        vol_rx,
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(|s: &str| println!("{s}")),
+    )
+    .await
+}
+
+/// GUI supervisor: new connection after death, exponential backoff 1s/2s/4s… cap 30s.
+/// [evidence: docs/架构设计.md §6; owntone player.c PLAYER_SPEAKER_RESURRECT_TIME]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub async fn run_supervised(
+    target: String,
+    device_hint: Option<String>,
+    mut stop_rx: watch::Receiver<bool>,
+    vol_rx: watch::Receiver<f64>,
+    reconnect: Arc<AtomicU64>,
+    status: Arc<dyn Fn(&str) + Send + Sync>,
+) -> Result<()> {
+    let mut backoff = 1u64;
+    loop {
+        if *stop_rx.borrow() {
+            status("[STATUS] idle");
+            return Ok(());
+        }
+        let vol = *vol_rx.borrow();
+        match run_session(
+            &target,
+            device_hint.as_deref(),
+            vol,
+            stop_rx.clone(),
+            vol_rx.clone(),
+            reconnect.clone(),
+            status.clone(),
+        )
+        .await
+        {
+            Ok(()) => {
+                if *stop_rx.borrow() {
+                    status("[STATUS] idle");
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                warn!("session died: {e}");
+            }
+        }
+        if *stop_rx.borrow() {
+            status("[STATUS] idle");
+            return Ok(());
+        }
+        let n = reconnect.fetch_add(1, Ordering::Relaxed) + 1;
+        status(&format!("[STATUS] recovering({n})"));
+        tokio::select! {
+            _ = stop_rx.changed() => {
+                if *stop_rx.borrow() {
+                    status("[STATUS] idle");
+                    return Ok(());
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
+        }
+        backoff = (backoff * 2).min(30);
+    }
+}
+
+pub async fn run_session(
+    target: &str,
+    device_hint: Option<&str>,
+    initial_volume: f64,
+    mut stop_rx: watch::Receiver<bool>,
+    vol_rx: watch::Receiver<f64>,
+    reconnect: Arc<AtomicU64>,
+    status: Arc<dyn Fn(&str) + Send + Sync>,
+) -> Result<()> {
+    status("[STATUS] probing");
     let addr = parse_host_port(target, AIRPLAY_PORT).map_err(|e| anyhow::anyhow!("{e}"))?;
     let identity = Identity::generate().map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -54,7 +169,7 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     rtsp.enable_control_encryption(&key)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("[STATUS] paired");
+    status("[STATUS] paired");
 
     let local = rtsp.local_addr().map_err(|e| anyhow::anyhow!("{e}"))?;
     let session_id = random_u32().map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -130,7 +245,7 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
     let (data_port, remote_control) = parse_stream_ports(&resp.body)?;
     info!(data_port, remote_control, "stream SETUP ok");
 
-    let vol = volume_body(0.5);
+    let vol = volume_body(initial_volume);
     rtsp.request(
         "SET_PARAMETER",
         &uri,
@@ -144,7 +259,7 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
     rtsp.request("RECORD", &uri, &extra_ref, None, &[])
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("[STATUS] setup_ok");
+    status("[STATUS] setup_ok");
 
     let capture = Capture::start(device_hint).map_err(|e| anyhow::anyhow!("{e}"))?;
     let packets = Arc::new(PacketQueue::new(64));
@@ -169,25 +284,58 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
     let rtsp_fb = rtsp.clone();
     let extra_fb = extra.clone();
     let ka = ka_miss.clone();
+    let uri_fb = uri.clone();
+    let (dead_tx, mut dead_rx) = tokio::sync::mpsc::channel::<String>(1);
+    let dead_fb = dead_tx.clone();
+    let mut vol_lock = vol_rx.clone();
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(2));
+        let mut consec = 0u32;
         loop {
-            tick.tick().await;
+            tokio::select! {
+                _ = tick.tick() => {}
+                Ok(()) = vol_lock.changed() => {}
+                else => break,
+            }
             let extra_ref: Vec<(&str, &str)> = extra_fb
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
+            let vol = volume_body(*vol_lock.borrow());
             let mut g = rtsp_fb.lock().await;
-            match g.exchange("POST", "/feedback", &extra_ref, None, &[]).await {
+            match g
+                .exchange(
+                    "SET_PARAMETER",
+                    &uri_fb,
+                    &extra_ref,
+                    Some("text/parameters"),
+                    vol.as_bytes(),
+                )
+                .await
+            {
                 Ok(r) if (200..300).contains(&r.code) => {}
+                Ok(r) => warn!(code = r.code, "volume lock not ok"),
+                Err(e) => warn!("volume lock: {e}"),
+            }
+            match g.exchange("POST", "/feedback", &extra_ref, None, &[]).await {
+                Ok(r) if (200..300).contains(&r.code) => {
+                    consec = 0;
+                }
                 Ok(r) => {
+                    consec += 1;
                     ka.fetch_add(1, Ordering::Relaxed);
-                    warn!(code = r.code, "feedback not ok");
+                    warn!(code = r.code, consec, "feedback not ok");
                 }
                 Err(e) => {
+                    consec += 1;
                     ka.fetch_add(1, Ordering::Relaxed);
-                    warn!("feedback: {e}");
+                    warn!(consec, "feedback: {e}");
                 }
+            }
+            drop(g);
+            if consec >= 3 {
+                let _ = dead_fb.try_send("keepalive".into());
+                break;
             }
         }
     });
@@ -197,6 +345,7 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
     let rtp_s = rtp_sent.clone();
     let rtx_s = rtx.clone();
     let ka_s = ka_miss.clone();
+    let rec_s = reconnect.clone();
     tokio::spawn(async move {
         let mut last_rtp = 0u64;
         loop {
@@ -205,11 +354,12 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
             let rtp_10s = sent.saturating_sub(last_rtp);
             last_rtp = sent;
             println!(
-                "[STATS] cap_disc={} q_drop={} rtx={} ka_miss={} reconnect=0 rtp_sent={} rtp_10s={} pkt_drop={}",
+                "[STATS] cap_disc={} q_drop={} rtx={} ka_miss={} reconnect={} rtp_sent={} rtp_10s={} pkt_drop={}",
                 stats_ring.disc.load(Ordering::Relaxed),
                 stats_ring.drops.load(Ordering::Relaxed),
                 rtx_s.load(Ordering::Relaxed),
                 ka_s.load(Ordering::Relaxed),
+                rec_s.load(Ordering::Relaxed),
                 sent,
                 rtp_10s,
                 stats_pkt.drops.load(Ordering::Relaxed),
@@ -217,7 +367,7 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
         }
     });
 
-    println!("[STATUS] streaming");
+    status("[STATUS] streaming");
     let data_addr = SocketAddr::new(host_ip, data_port);
     let ctl_addr = SocketAddr::new(
         host_ip,
@@ -240,8 +390,20 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
         rtp_sent,
     );
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            info!("ctrl-c, TEARDOWN");
+        _ = async {
+            loop {
+                if *stop_rx.borrow() {
+                    break;
+                }
+                if stop_rx.changed().await.is_err() {
+                    break;
+                }
+            }
+        } => {
+            info!("stop, TEARDOWN");
+        }
+        reason = dead_rx.recv() => {
+            warn!(?reason, "session dead");
         }
         r = pump => {
             if let Err(e) = r {
@@ -273,7 +435,7 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
         }
     }
     drop(capture);
-    println!("[STATUS] dead(teardown)");
+    status("[STATUS] dead(teardown)");
     Ok(())
 }
 

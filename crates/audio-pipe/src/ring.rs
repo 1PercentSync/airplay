@@ -10,6 +10,9 @@ pub struct SampleRing {
     pub rate: AtomicU32,
     pub disc: AtomicU64,
     pub drops: AtomicU64,
+    /// IAudioEndpointVolume scalar as f32 bits. 1.0 = full (loopback tap is
+    /// typically pre-master-volume). [evidence: MS Volume Controls; spec §11]
+    pub endpoint_gain: AtomicU32,
 }
 
 impl SampleRing {
@@ -20,7 +23,17 @@ impl SampleRing {
             rate: AtomicU32::new(0),
             disc: AtomicU64::new(0),
             drops: AtomicU64::new(0),
+            endpoint_gain: AtomicU32::new(1.0f32.to_bits()),
         }
+    }
+
+    pub fn set_endpoint_gain(&self, gain: f32) {
+        self.endpoint_gain
+            .store(gain.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn endpoint_gain(&self) -> f32 {
+        f32::from_bits(self.endpoint_gain.load(Ordering::Relaxed))
     }
 
     pub fn set_format(&self, rate: u32) {

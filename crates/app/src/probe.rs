@@ -24,6 +24,15 @@ pub fn devices() -> Result<()> {
 }
 
 pub async fn discover() -> Result<()> {
+    let list = browse().await?;
+    for d in &list {
+        print_discovered(d);
+    }
+    println!("[STATUS] discover_ok count={}", list.len());
+    Ok(())
+}
+
+pub async fn browse() -> Result<Vec<Discovered>> {
     let mdns = ServiceDaemon::new().map_err(|e| anyhow::anyhow!("mdns daemon: {e}"))?;
     let rx = mdns
         .browse("_airplay._tcp.local.")
@@ -86,45 +95,65 @@ pub async fn discover() -> Result<()> {
     let _ = mdns.shutdown();
     let mut list: Vec<_> = found.into_values().collect();
     list.sort_by(|a, b| a.fullname.cmp(&b.fullname));
-    for d in &list {
-        let use_addr = d
-            .addrs
-            .iter()
-            .find(|a| a.is_ipv4())
-            .or_else(|| d.addrs.first());
-        let name = d.fullname.split("._airplay").next().unwrap_or(&d.fullname);
-        println!("Name       : {name}");
-        println!("Host       : {}", d.host);
-        println!("Port       : {}", d.port);
-        print!("Addresses  :");
-        for a in &d.addrs {
-            print!(" {a}");
-        }
-        println!();
-        if let Some(ip) = use_addr {
-            println!("Use        : {ip}:{}", d.port);
-        }
-        println!(
-            "TXT        : model={} deviceid={} features={} srcvers={} protovers={} osvers={}",
-            d.model, d.deviceid, d.features, d.srcvers, d.protovers, d.osvers
-        );
-        println!();
-    }
-    println!("[STATUS] discover_ok count={}", list.len());
-    Ok(())
+    Ok(list)
 }
 
-struct Discovered {
-    fullname: String,
-    host: String,
-    port: u16,
-    addrs: Vec<IpAddr>,
-    model: String,
-    deviceid: String,
-    features: String,
-    srcvers: String,
-    protovers: String,
-    osvers: String,
+fn print_discovered(d: &Discovered) {
+    let use_addr = d.use_addr();
+    let name = d.display_name();
+    println!("Name       : {name}");
+    println!("Host       : {}", d.host);
+    println!("Port       : {}", d.port);
+    print!("Addresses  :");
+    for a in &d.addrs {
+        print!(" {a}");
+    }
+    println!();
+    if let Some(ip) = use_addr {
+        println!("Use        : {ip}:{}", d.port);
+    }
+    println!(
+        "TXT        : model={} deviceid={} features={} srcvers={} protovers={} osvers={}",
+        d.model, d.deviceid, d.features, d.srcvers, d.protovers, d.osvers
+    );
+    println!();
+}
+
+#[derive(Clone, Debug)]
+pub struct Discovered {
+    pub fullname: String,
+    pub host: String,
+    pub port: u16,
+    pub addrs: Vec<IpAddr>,
+    pub model: String,
+    pub deviceid: String,
+    pub features: String,
+    pub srcvers: String,
+    pub protovers: String,
+    pub osvers: String,
+}
+
+impl Discovered {
+    pub fn display_name(&self) -> String {
+        self.fullname
+            .split("._airplay")
+            .next()
+            .unwrap_or(&self.fullname)
+            .to_string()
+    }
+
+    pub fn use_addr(&self) -> Option<IpAddr> {
+        self.addrs
+            .iter()
+            .find(|a| a.is_ipv4())
+            .copied()
+            .or_else(|| self.addrs.first().copied())
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn target(&self) -> Option<String> {
+        self.use_addr().map(|ip| format!("{}:{}", ip, self.port))
+    }
 }
 
 fn scoped_ip(s: &mdns_sd::ScopedIp) -> Option<IpAddr> {

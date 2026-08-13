@@ -113,6 +113,7 @@ mod windows_cap {
     use windows::core::HSTRING;
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
         eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
         MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
@@ -325,7 +326,48 @@ mod windows_cap {
             let _ = r.send(Ok(()));
         }
 
-        let run = capture_loop(&capture, event, ring, stop, rate, ch, bits, subtype);
+        // Sndvol device slider vs loopback tap.
+        // No hardware volume → Windows substitutes software volume in the engine
+        // [evidence: ms_query_hardware_support.md]. No hardware loopback pin →
+        // WASAPI copies that engine output to the render pin and to us
+        // [evidence: ms_loopback_recording.md]. Multiplying again would square it.
+        // Hardware volume → DAC after the tap; then we do apply the scalar.
+        let epvol: Option<IAudioEndpointVolume> = device.Activate(CLSCTX_ALL, None).ok();
+        let apply_scalar = match &epvol {
+            Some(ep) => match ep.QueryHardwareSupport() {
+                Ok(mask) => {
+                    let hw_vol = (mask & 0x1) != 0;
+                    tracing::info!(
+                        mask,
+                        hw_vol,
+                        "QueryHardwareSupport; multiply PCM only if hardware volume"
+                    );
+                    hw_vol
+                }
+                Err(e) => {
+                    tracing::info!(
+                        error = %e,
+                        "QueryHardwareSupport failed, not multiplying PCM"
+                    );
+                    false
+                }
+            }
+            None => false,
+        };
+        if apply_scalar {
+            tracing::info!("endpoint volume is hardware, applying as capture gain");
+        }
+        let run = capture_loop(
+            &capture,
+            event,
+            ring,
+            stop,
+            rate,
+            ch,
+            bits,
+            subtype,
+            if apply_scalar { epvol.as_ref() } else { None },
+        );
         let _ = client.Stop();
         if !mmcss.is_invalid() {
             AvRevertMmThreadCharacteristics(mmcss);
@@ -343,9 +385,11 @@ mod windows_cap {
         ch: u16,
         bits: u16,
         subtype: &str,
+        epvol: Option<&IAudioEndpointVolume>,
     ) -> Result<()> {
         let _ = rate;
         while !stop.load(Ordering::SeqCst) {
+            poll_endpoint_gain(epvol, ring);
             let wr = WaitForSingleObject(event, 2000);
             if wr == WAIT_TIMEOUT {
                 continue;
@@ -386,6 +430,25 @@ mod windows_cap {
             }
         }
         Ok(())
+    }
+
+    fn poll_endpoint_gain(epvol: Option<&IAudioEndpointVolume>, ring: &SampleRing) {
+        let Some(ep) = epvol else {
+            return;
+        };
+        unsafe {
+            let scalar = match ep.GetMasterVolumeLevelScalar() {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+            let muted = ep.GetMute().map(|b| b.as_bool()).unwrap_or(false);
+            let g = if muted { 0.0 } else { scalar };
+            let prev = ring.endpoint_gain();
+            ring.set_endpoint_gain(g);
+            if (prev - g).abs() > 0.01 {
+                tracing::info!(g, muted, "endpoint gain applied to capture PCM");
+            }
+        }
     }
 
     unsafe fn convert_to_stereo(
