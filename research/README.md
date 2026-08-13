@@ -7,7 +7,7 @@
 | 阶段 | 状态 | 产出 |
 |---|---|---|
 | 需求冻结 | ✅ | `REQUIREMENTS.zh-CN.md`（冻结，未经授权禁改） |
-| 阶段一：协议调研（两轮） | ✅（2026-08-12 依据清理完成） | `02-协议调研.md`、`03-协议调研-第二轮.md`、`07-参考清理.md` |
+| 阶段一：协议调研（两轮） | ✅（2026-08-12 依据清理+取证完成） | `02-协议调研.md`、`03-协议调研-第二轮.md`、`07-参考清理.md`；**实现规范换代为 `docs/协议实现规范.md`** |
 | 阶段二：音频捕获调研 | ✅ | `04-音频捕获.md` |
 | 技术选型（Context7 验证） | ✅ | `05-技术选型.md` |
 | 架构设计文档 | ✅ | `docs/架构设计.md` |
@@ -33,6 +33,6 @@
 - 已移除（不可信）：airplay-cli、cliairplay、airplay2-rs ×3、AirSend —— 明细 `07-参考清理.md`
 - 协议文档/网页落盘于 `references/`（未入版本控制）
 
-## 协议发送链路（实现蓝本，详见 02 §3 + 03；均经 A 级或真机锚定）
+## 协议发送链路（实现蓝本 = `docs/协议实现规范.md` 特性矩阵；本表为速览）
 
-1. mDNS 发现（`_airplay._tcp`）/ 手动 IP → 2. 明文 GET /info（能力探测）→ 3. transient pair-setup（HKP 4，PIN 3939，SRP-6a/SHA-512/3072，M1-M4）→ 4. 加密 RTSP（ChaCha20-Poly1305 帧，IKM=64B K）→ 5. session SETUP（NTP timingPort，owntone 最小字段集）→ 6. 事件通道（反向 TCP，全程服务）→ 7. RECORD → 8. stream SETUP（type 96，ALAC，spf 352，shk=K 前 32B）→ 9. NTP 计时应答（先于流 SETUP 就绪）+ 1s sync → 10. ALAC RTP 加密发送（44100/s pacing，重传 backlog）→ 保活（2s 空 body /feedback + 事件服务）；断流→新连接重配。
+1. mDNS 发现（`_airplay._tcp`）/ 手动 IP → 2. 明文 GET /info（能力探测）→ 3. transient pair-setup（HKP 4，PIN 3939，SRP-6a/SHA-512/3072，M1-M4）→ 4. 加密 RTSP（ChaCha20-Poly1305 帧，IKM=64B K）→ 5. session SETUP（NTP timingPort）→ 6. 事件通道（反向 TCP，全程服务，连接重试）→ 7. **stream SETUP（type 96，ALAC，spf 352）→ 8. RECORD**（pyatv 序；owntone 序真机证伪至卡点，见规范 §6.3）→ 9. NTP 计时应答（先于流 SETUP 就绪）+ 1s sync → 10. ALAC RTP 加密发送（44100/s pacing，重传 backlog）→ 保活（2s 空 body /feedback + 事件服务）；断流→新连接重配。
