@@ -56,6 +56,8 @@
 | pyatv 协议文档页 | `pyatv_protocols.html` | pyatv.dev（A 级项目官方文档） |
 | MA airplay provider README | `ma_airplay_provider_README.md` | github.com/music-assistant/server —— **与 airplay-cli 同组织，声明不予采信** |
 | Reddit: AirSend 发布帖 | `reddit_airsend.html` | reddit.com/r/rust（社区反馈；AirSend 本体已移除） |
+| MS Learn: Loopback Recording | `ms_loopback_recording.md` | learn.microsoft.com（官方；WASAPI loopback 行为依据） |
+| MS Learn: Volume Controls | `ms_volume_controls.md` | learn.microsoft.com（官方；端点音量回调依据） |
 
 ## 三、已移除（2026-08-12，不可信）
 
