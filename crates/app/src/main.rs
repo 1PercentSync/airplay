@@ -90,7 +90,8 @@ fn init_tracing() -> Result<()> {
         .unwrap_or_else(|| std::path::PathBuf::from("airplay.log"));
     let file = OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(true)
         .open(&log_path)
         .with_context(|| format!("open log {}", log_path.display()))?;
     let writer = std::io::stdout.and(file);
@@ -100,6 +101,7 @@ fn init_tracing() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_writer(writer)
+        .with_ansi(false)
         .init();
     Ok(())
 }

@@ -25,6 +25,11 @@ pub fn list_render_devices() -> Result<Vec<RenderDevice>> {
     windows_enum::list_render_devices()
 }
 
+#[cfg(windows)]
+pub(crate) fn imm_friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> String {
+    windows_enum::imm_friendly_name(device)
+}
+
 /// [evidence: Sunshine audio.cpp:1119-1146 GetId/FriendlyName;
 /// Sunshine audio.cpp:373 GetMixFormat; tools/audio.cpp:163-227, 276-307]
 #[cfg(windows)]
@@ -33,8 +38,8 @@ mod windows_enum {
     use airplay_core::{Error, Result};
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Media::Audio::{
-        eRender, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
-        WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
+        eRender, IAudioClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+        DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
@@ -75,15 +80,7 @@ mod windows_enum {
             let id = id_pwstr.to_string().unwrap_or_default();
             CoTaskMemFree(Some(id_pwstr.0 as *const core::ffi::c_void as *mut _));
 
-            let mut friendly = String::from("(unnamed)");
-            if let Ok(store) = device.OpenPropertyStore(STGM_READ) {
-                if let Ok(pv) = store.GetValue(&PKEY_Device_FriendlyName) {
-                    let s = pv.to_string();
-                    if !s.is_empty() {
-                        friendly = s;
-                    }
-                }
-            }
+            let friendly = imm_friendly_name(&device);
 
             let client: IAudioClient = device
                 .Activate(CLSCTX_ALL, None)
@@ -133,5 +130,18 @@ mod windows_enum {
             });
         }
         Ok(out)
+    }
+
+    pub(super) fn imm_friendly_name(device: &IMMDevice) -> String {
+        let mut name = String::from("(unnamed)");
+        if let Ok(store) = unsafe { device.OpenPropertyStore(STGM_READ) } {
+            if let Ok(pv) = unsafe { store.GetValue(&PKEY_Device_FriendlyName) } {
+                let s = pv.to_string();
+                if !s.is_empty() {
+                    name = s;
+                }
+            }
+        }
+        name
     }
 }

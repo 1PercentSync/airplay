@@ -111,7 +111,6 @@ mod windows_cap {
     use super::*;
     use std::sync::mpsc::Sender;
     use windows::core::HSTRING;
-    use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
@@ -121,7 +120,7 @@ mod windows_cap {
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
-        COINIT_MULTITHREADED, STGM_READ,
+        COINIT_MULTITHREADED,
     };
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
@@ -208,7 +207,7 @@ mod windows_cap {
                 let device = collection
                     .Item(i)
                     .map_err(|e| Error::Audio(format!("Item: {e}")))?;
-                let name = friendly_name(&device);
+                let name = crate::enum_devices::imm_friendly_name(&device);
                 if name.to_ascii_lowercase().contains(&h_l) {
                     tracing::info!(name, "capture device by name");
                     return Ok(device);
@@ -226,7 +225,7 @@ mod windows_cap {
             let device = collection
                 .Item(i)
                 .map_err(|e| Error::Audio(format!("Item: {e}")))?;
-            let name = friendly_name(&device);
+            let name = crate::enum_devices::imm_friendly_name(&device);
             if name
                 .to_ascii_lowercase()
                 .contains("steam streaming speakers")
@@ -238,19 +237,6 @@ mod windows_cap {
         enumerator
             .GetDefaultAudioEndpoint(eRender, eConsole)
             .map_err(|e| Error::Audio(format!("GetDefaultAudioEndpoint: {e}")))
-    }
-
-    unsafe fn friendly_name(device: &IMMDevice) -> String {
-        let mut name = String::from("(unnamed)");
-        if let Ok(store) = device.OpenPropertyStore(STGM_READ) {
-            if let Ok(pv) = store.GetValue(&PKEY_Device_FriendlyName) {
-                let s = pv.to_string();
-                if !s.is_empty() {
-                    name = s;
-                }
-            }
-        }
-        name
     }
 
     unsafe fn session(

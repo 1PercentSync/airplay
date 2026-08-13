@@ -288,7 +288,7 @@ pub async fn run_session(
     let (dead_tx, mut dead_rx) = tokio::sync::mpsc::channel::<String>(1);
     let dead_fb = dead_tx.clone();
     let mut vol_lock = vol_rx.clone();
-    tokio::spawn(async move {
+    let vol_task = tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(2));
         let mut consec = 0u32;
         loop {
@@ -353,7 +353,7 @@ pub async fn run_session(
             let sent = rtp_s.load(Ordering::Relaxed);
             let rtp_10s = sent.saturating_sub(last_rtp);
             last_rtp = sent;
-            println!(
+            info!(
                 "[STATS] cap_disc={} q_drop={} rtx={} ka_miss={} reconnect={} rtp_sent={} rtp_10s={} pkt_drop={}",
                 stats_ring.disc.load(Ordering::Relaxed),
                 stats_ring.drops.load(Ordering::Relaxed),
@@ -411,6 +411,8 @@ pub async fn run_session(
             }
         }
     }
+
+    vol_task.abort();
 
     let empty = plist_encode(&Value::Dict(vec![])).map_err(|e| anyhow::anyhow!("{e}"))?;
     {
