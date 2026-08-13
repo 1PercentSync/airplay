@@ -1,0 +1,20 @@
+[package]
+name = "airplay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "airplay"
+path = "src/main.rs"
+
+[dependencies]
+airplay-core = { path = "../airplay-core" }
+airplay-crypto = { path = "../airplay-crypto" }
+airplay-rtsp = { path = "../airplay-rtsp" }
+audio-pipe = { path = "../audio-pipe" }
+anyhow.workspace = true
+mdns-sd.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

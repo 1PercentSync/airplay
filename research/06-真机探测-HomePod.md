@@ -1,27 +1,27 @@
 # 研究笔记 06：真机探测事实（HomePod gen 2，192.168.1.12）
 
-> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。2026-08-13 探针复测的设备事实仍有效；写出该探针的代码因未对每一特性读全参考，用户视为受污染，**已全量删除**（勿通过 git 回看 `545e2d8`）。
+> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。更早一份探针因未对每一特性读全参考被删（勿通过 git 回看 `545e2d8`）。下列设备事实以 2026-08-13 重写探针的 Windows 真机跑分为准。
 
-## 2026-08-13 探针复测（代码已删；下表是设备/声卡事实）
+## 2026-08-13 重写探针（当前 `crates/`）
 
-用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑完三件套，随后加测 mDNS 发现。成功行如下。
+用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑完四条命令。成功行如下。
 
 | 命令 | 成功行 | 证实了什么 |
 |---|---|---|
 | `probe devices` | `[STATUS] devices_ok count=3` | WASAPI 枚举与 `GetMixFormat` 可用 |
+| `probe discover` | `[STATUS] discover_ok count=1` | 浏览 `_airplay._tcp` 5 秒，扫到同一台 HomePod |
 | `probe airplay 192.168.1.12` | `[STATUS] info_ok` | 明文 `GET /info` 返回 200，body 2009 字节，bplist 可解析 |
 | `probe pair 192.168.1.12` | `[STATUS] pair_ok` | transient M1–M4，HAMK 通过，`session_key_len=64` |
-| `probe discover` | `[STATUS] discover_ok count=1` | 浏览 `_airplay._tcp` 5 秒，扫到同一台 HomePod |
 
-`probe discover` 输出：名称 HomePod For Alex；端口 7000；IPv4 `192.168.1.12`（另有两条 ULA IPv6 与一条 `fe80` 链路本地）；`Use : 192.168.1.12:7000`；TXT `model=AudioAccessory6,1`、`deviceid=8E:35:21:D6:F9:74`、`features=0x4A7FCA00,0x3C354BD0`、`srcvers=980.71.1`、`protovers=1.1`、`osvers=27.0`。与先前手动 IP 和 `/info` 一致。
+`probe discover`：名称 HomePod For Alex；Host `HomePod-For-Alex.local.`；端口 7000；IPv4 `192.168.1.12`（另有两条 ULA IPv6 与一条 `fe80` 链路本地）；`Use : 192.168.1.12:7000`；TXT `model=AudioAccessory6,1`、`deviceid=8E:35:21:D6:F9:74`、`features=0x4A7FCA00,0x3C354BD0`、`srcvers=980.71.1`、`protovers=1.1`、`osvers=27.0`。与手动 IP 和 `/info` 一致。
 
-命令行：M1 发送 State=1, Method=0, Flags=16；M2 收到 State=2, Salt=16B, PublicKey=384B；M3 发送 State=3, PublicKey=384B, Proof=64B；M4 收到 State=4, Proof=64B；HAMK ok。未发 `/pair-pin-start`。
+配对日志：M1 发送 State=1, Method=0, Flags=16；M2 收到 State=2, Salt=16B, PublicKey=384B；M3 发送 State=3, PublicKey=384B, Proof=64B；M4 收到 State=4, Proof=64B；HAMK ok。未发 `/pair-pin-start`。
+
+`/info` 中 `supportedFormats.bufferStream` 打印为 `-577021992844656640 (0xf7fe018e00e80000)`（64 位位型十六进制，未按 i128 符号扩展）。`audioStream` 十进制 21235712 = `0x1440800`。`features` = `0x3c354bd04a7fca00`。`statusFlags` 十进制 623620 = `0x98404`。`senderAddress` = `192.168.1.100:52459`。
 
 **这次没测到的**：加密 RTSP、session/stream SETUP、RECORD、NTP、出声。
 
-设备能力与声卡表与 2026-08-12 一致（见下）。当时 Windows 编译曾因 packed `WAVEFORMATEX` 在 `format!` 里取字段引用报 E0793。
-
-显示问题：`supportedFormats.bufferStream` 打成 `-577021992844656640 (0xfffffffffffffffff7fe018e00e80000)`。这是 8 字节 plist 整数按有符号展开后的十六进制，不是解码失败。按 64 位位型看是 `0xf7fe018e00e80000`。决策 B 不用 bufferStream。
+设备能力与声卡表与此前一致（见下）。
 
 ## 设备事实
 
@@ -39,7 +39,7 @@
 | keepAliveSendStatsAsBody | true | 设备广告支持统计 body；但 pyatv/owntone 均以**空 body** /feedback 真机服役 `[代码: pyatv support/rtsp.py:246; owntone airplay.c:3701]` → 空 body 起步，统计 body 为可选增强 |
 | initialVolume | -26.25 dB | 接收端初始音量 |
 | volumeControlType | 3 | SET_PARAMETER 绝对音量可用 |
-| senderAddress | 192.168.1.100 | 用户 PC 与 HomePod 同子网 |
+| senderAddress | 192.168.1.100:52459 | 用户 PC 与 HomePod 同子网（端口为本次 `/info` 连接的本地口） |
 
 ## 声卡事实（probe devices）
 
