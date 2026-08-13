@@ -1,0 +1,12 @@
+[package]
+name = "airplay-rtsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+airplay-core = { path = "../airplay-core" }
+airplay-crypto = { path = "../airplay-crypto" }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

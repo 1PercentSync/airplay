@@ -58,6 +58,7 @@
 | Reddit: AirSend 发布帖 | `reddit_airsend.html` | reddit.com/r/rust（社区反馈；AirSend 本体已移除） |
 | MS Learn: Loopback Recording | `ms_loopback_recording.md` | learn.microsoft.com（官方；WASAPI loopback 行为依据） |
 | MS Learn: Volume Controls | `ms_volume_controls.md` | learn.microsoft.com（官方；端点音量回调依据） |
+| RFC 5054 SRP (3072-bit group + Appendix B) | `rfc5054_srp.md` | rfc-editor.org（官方；HAP SRP N/g 与测试向量布局） |
 
 ## 三、已移除（2026-08-12，不可信）
 

@@ -1,6 +1,24 @@
 # 研究笔记 06：真机探测事实（HomePod gen 2，192.168.1.12）
 
-> 2026-08-12，用户真机执行 `probe` 三件套的全部结论。后续会话层实现的参数以此为准。
+> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。2026-08-13 是清理后重写探针在同一台设备上的复测。
+
+## 2026-08-13 清理后探针复测（本份代码）
+
+用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑完三件套。成功行如下。
+
+| 命令 | 成功行 | 证实了什么 |
+|---|---|---|
+| `probe devices` | `[STATUS] devices_ok count=3` | WASAPI 枚举与 `GetMixFormat` 可用 |
+| `probe airplay 192.168.1.12` | `[STATUS] info_ok` | 明文 `GET /info` 返回 200，body 2009 字节，bplist 可解析 |
+| `probe pair 192.168.1.12` | `[STATUS] pair_ok` | transient M1–M4，HAMK 通过，`session_key_len=64` |
+
+命令行：M1 发送 State=1, Method=0, Flags=16；M2 收到 State=2, Salt=16B, PublicKey=384B；M3 发送 State=3, PublicKey=384B, Proof=64B；M4 收到 State=4, Proof=64B；HAMK ok。未发 `/pair-pin-start`。
+
+**这次没测到的**：加密 RTSP、session/stream SETUP、RECORD、NTP、出声。
+
+设备能力与声卡表与 2026-08-12 一致（见下）。Windows 编译曾因 packed `WAVEFORMATEX` 在 `format!` 里取字段引用报 E0793，已改为先拷到局部变量。
+
+显示问题：`supportedFormats.bufferStream` 打成 `-577021992844656640 (0xfffffffffffffffff7fe018e00e80000)`。这是 8 字节 plist 整数按有符号展开后的十六进制，不是解码失败。按 64 位位型看是 `0xf7fe018e00e80000`。决策 B 不用 bufferStream。
 
 ## 设备事实
 
@@ -36,7 +54,11 @@
 
 ---
 
-## 2026-08-12 里程碑②真机迭代 #1：HKDF IKM 宽度 bug（已修）
+## 2026-08-12 已删除实现的可播放迭代（不是本份代码）
+
+下列两条是已删除实现（git `a2898cb`）在里程碑②上的真机记录。协议结论（IKM=64B、计时须先于流 SETUP）仍有效；那份代码本身已不在仓库。
+
+### 迭代 #1：HKDF IKM 宽度 bug（已修）
 
 **现象**：`run` 配对成功后第一个加密 RTSP 请求（GET /info）即被接收端断开（`early eof`）。
 
@@ -52,7 +74,7 @@
 
 ---
 
-## 2026-08-12 里程碑②真机迭代 #2：计时服务须在流 SETUP 前就绪（已修，但非卡点根因）
+### 迭代 #2：计时服务须在流 SETUP 前就绪（已修，但非卡点根因）
 
 **现象**：加密 GET /info ✓ → session SETUP ✓（event_port 下发）→ RECORD ✓ → **流 SETUP 无响应**（接收端沉默）；随后的重连在 M1 短暂被拒（HomePod 清理悬挂会话，数秒后自愈）。
 
