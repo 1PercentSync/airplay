@@ -4,3 +4,4 @@ reference/
 research/references/*
 !research/references/REFERENCES.md
 airplay.log
+logs/
