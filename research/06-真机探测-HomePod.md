@@ -4,7 +4,7 @@
 
 ## 2026-08-13 重写探针（当前 `crates/`）
 
-用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑完四条命令。成功行如下。
+用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑探针。2026-08-13 14:50 跑完 `devices`/`discover`/`airplay`/`pair`。15:02 再跑一遍，并加上 `probe channel`。成功行如下。
 
 | 命令 | 成功行 | 证实了什么 |
 |---|---|---|
@@ -12,6 +12,7 @@
 | `probe discover` | `[STATUS] discover_ok count=1` | 浏览 `_airplay._tcp` 5 秒，扫到同一台 HomePod |
 | `probe airplay 192.168.1.12` | `[STATUS] info_ok` | 明文 `GET /info` 返回 200，body 2009 字节，bplist 可解析 |
 | `probe pair 192.168.1.12` | `[STATUS] pair_ok` | transient M1–M4，HAMK 通过，`session_key_len=64` |
+| `probe channel 192.168.1.12`（15:02 日志） | `[STATUS] channel_ok` | 同一条 TCP 上配对后加密 `GET /info` 返回 200，body 2009 字节，与明文 `/info` 一致 |
 
 `probe discover`：名称 HomePod For Alex；Host `HomePod-For-Alex.local.`；端口 7000；IPv4 `192.168.1.12`（另有两条 ULA IPv6 与一条 `fe80` 链路本地）；`Use : 192.168.1.12:7000`；TXT `model=AudioAccessory6,1`、`deviceid=8E:35:21:D6:F9:74`、`features=0x4A7FCA00,0x3C354BD0`、`srcvers=980.71.1`、`protovers=1.1`、`osvers=27.0`。与手动 IP 和 `/info` 一致。
 
@@ -19,7 +20,9 @@
 
 `/info` 中 `supportedFormats.bufferStream` 打印为 `-577021992844656640 (0xf7fe018e00e80000)`（64 位位型十六进制，未按 i128 符号扩展）。`audioStream` 十进制 21235712 = `0x1440800`。`features` = `0x3c354bd04a7fca00`。`statusFlags` 十进制 623620 = `0x98404`。`senderAddress` = `192.168.1.100:52459`。
 
-**这次没测到的**：加密 RTSP、session/stream SETUP、RECORD、NTP、出声。
+15:02 日志 `logs/probe-20260813-150235.log`：`failed_steps=0`。`probe channel` 先完成 M1–M4（HAMK ok），再打印 `encrypted RTSP 200 OK, body 2009 bytes` 和 `[STATUS] channel_ok`。这证实本机 HomePod 接受同连接控制通道加密。构建用的是工作区未提交代码（日志里 `git=f30cc35` 只是当时 HEAD）。
+
+**还没测到的**：session/stream SETUP、RECORD、NTP、出声。
 
 设备能力与声卡表与此前一致（见下）。
 

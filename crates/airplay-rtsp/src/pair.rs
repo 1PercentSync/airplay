@@ -1,20 +1,18 @@
 //! Transient HAP pair-setup M1–M4 on RTSP/1.0 POST `/pair-setup`.
 //!
 //! Selected: owntone M1 order State, Method, Flags; skip `/pair-pin-start`;
-//! verify HAMK; PIN 3939; HKP 4.
+//! verify HAMK; PIN 3939; HKP 4. Leaves the TCP in place for HAP frames.
 //! [evidence: owntone pair_homekit.c:1219-1258,1291-1299,1422-1514;
 //! owntone airplay.c:2836-2838,3697-3698; pyatv hap_transient.py:49-82
 //! (pin-start and discard-M4 not followed); airplay2-receiver hap.py:513-541]
 
-use crate::rtsp::{Identity, RtspClient};
+use crate::rtsp::RtspClient;
 use airplay_core::{Error, Result, HKP_TRANSIENT};
 use airplay_crypto::srp::SrpClient;
 use airplay_crypto::tlv8::{self, TlvType, FLAG_TRANSIENT};
-use std::net::SocketAddr;
 use tracing::info;
 
-pub async fn transient_pair(addr: SocketAddr, identity: Identity) -> Result<[u8; 64]> {
-    let mut rtsp = RtspClient::connect(addr, identity).await?;
+pub async fn transient_pair(rtsp: &mut RtspClient) -> Result<[u8; 64]> {
     let mut srp = SrpClient::new()?;
 
     let m1 = tlv8::encode(&[
@@ -23,7 +21,7 @@ pub async fn transient_pair(addr: SocketAddr, identity: Identity) -> Result<[u8;
         (TlvType::FLAGS, &[FLAG_TRANSIENT]),
     ]);
     info!("M1 send State=1 Method=0 Flags={}", FLAG_TRANSIENT);
-    let r2 = pair_post(&mut rtsp, &m1).await?;
+    let r2 = pair_post(rtsp, &m1).await?;
     let t2 = tlv8::decode(&r2)?;
     if let Some(err) = tlv8::get_u8(&t2, TlvType::ERROR) {
         return Err(Error::Pair(format!("M2 TLV error {err}")));
@@ -51,7 +49,7 @@ pub async fn transient_pair(addr: SocketAddr, identity: Identity) -> Result<[u8;
         (TlvType::PUBLIC_KEY, &a),
         (TlvType::PROOF, m1_proof.as_slice()),
     ]);
-    let r4 = pair_post(&mut rtsp, &m3).await?;
+    let r4 = pair_post(rtsp, &m3).await?;
     let t4 = tlv8::decode(&r4)?;
     if let Some(err) = tlv8::get_u8(&t4, TlvType::ERROR) {
         return Err(Error::Pair(format!("M4 TLV error {err}")));
@@ -60,7 +58,18 @@ pub async fn transient_pair(addr: SocketAddr, identity: Identity) -> Result<[u8;
         tlv8::get(&t4, TlvType::PROOF).ok_or_else(|| Error::Pair("M4 missing Proof".into()))?;
     let st4 = tlv8::get_u8(&t4, TlvType::STATE).unwrap_or(0);
     info!("M4 recv State={st4} Proof={}B", proof.len());
-    srp.verify_hamk(proof)?;
+    if let Err(e) = srp.verify_hamk(proof) {
+        tracing::error!(
+            salt_first_zero = salt.first() == Some(&0),
+            a_first_zero = a.first() == Some(&0),
+            b_first_zero = pk_b.first() == Some(&0),
+            salt_len = salt.len(),
+            a_len = a.len(),
+            b_len = pk_b.len(),
+            "HAMK mismatch"
+        );
+        return Err(e);
+    }
     info!("HAMK ok");
     let key = *srp.session_key()?;
     info!(session_key_len = key.len(), "transient pairing complete");

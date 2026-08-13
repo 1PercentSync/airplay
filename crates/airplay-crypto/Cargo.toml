@@ -8,6 +8,8 @@ license.workspace = true
 airplay-core = { path = "../airplay-core" }
 num-bigint.workspace = true
 sha2.workspace = true
+hkdf.workspace = true
+chacha20poly1305.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

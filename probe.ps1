@@ -1,4 +1,4 @@
-# Windows one-shot: release build, then the four probe commands.
+# Windows one-shot: release build, then the probe commands.
 # Writes a timestamped log under logs\ (gitignored).
 #
 #   .\probe.ps1
@@ -106,6 +106,11 @@ $results["probe pair"] = Invoke-LoggedNative `
     -Title "probe pair" `
     -FilePath $exe `
     -ArgumentList @("probe", "pair", $Target)
+
+$results["probe channel"] = Invoke-LoggedNative `
+    -Title "probe channel" `
+    -FilePath $exe `
+    -ArgumentList @("probe", "channel", $Target)
 
 Write-Log "======== summary ========"
 $failed = 0

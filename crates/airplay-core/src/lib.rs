@@ -38,6 +38,8 @@ pub enum Error {
     Tlv(String),
     #[error("srp: {0}")]
     Srp(String),
+    #[error("crypto: {0}")]
+    Crypto(String),
     #[error("pairing: {0}")]
     Pair(String),
     #[error("mdns: {0}")]

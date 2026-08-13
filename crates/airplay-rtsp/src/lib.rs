@@ -1,4 +1,4 @@
-//! Plaintext RTSP, binary plist, and HAP transient pair-setup.
+//! RTSP (plaintext then HAP frames), binary plist, and HAP transient pair-setup.
 
 mod pair;
 mod plist;

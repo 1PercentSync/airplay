@@ -17,6 +17,8 @@ version = "0.1.0"
 anyhow = "1"
 thiserror = "2"
 sha2 = "0.11"
+hkdf = "0.13"
+chacha20poly1305 = "0.11"
 num-bigint = "0.5"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 tracing = "0.1"

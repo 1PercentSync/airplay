@@ -59,6 +59,7 @@
 | MS Learn: Loopback Recording | `ms_loopback_recording.md` | learn.microsoft.com（官方；WASAPI loopback 行为依据） |
 | MS Learn: Volume Controls | `ms_volume_controls.md` | learn.microsoft.com（官方；端点音量回调依据） |
 | RFC 5054 SRP (3072-bit group + Appendix B) | `rfc5054_srp.md` | rfc-editor.org（官方；HAP SRP N/g 与测试向量布局） |
+| RFC 8439 ChaCha20-Poly1305 AEAD §2.8.2 | `rfc8439_aead.md` | rfc-editor.org（官方；IETF AEAD 静态向量，原语检查用） |
 | CPython 3.12 plistlib 整数宽度 | `cpython_3.12_plistlib_int.md` | github.com/python/cpython（pyatv 所用 bplist 库；仅整数编解码摘录） |
 
 ## 三、已移除（2026-08-12，不可信）

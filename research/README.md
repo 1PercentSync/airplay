@@ -11,7 +11,7 @@
 | 阶段二：音频捕获调研 | ✅ | `04-音频捕获.md` |
 | 技术选型（Context7 验证） | ✅ | `05-技术选型.md` |
 | 架构设计文档 | ✅ | `docs/架构设计.md` |
-| 里程碑 ① 探针 CLI | ✅ 2026-08-13 Windows 真机 | 重写后的 `crates/` 探针：`devices_ok count=3`、`discover_ok count=1`、`info_ok`（body 2009）、`pair_ok`（HAMK，`session_key_len=64`）。日志见 `06`。未测加密 RTSP / SETUP / 出声。 |
+| 里程碑 ① 探针 CLI | ✅ 2026-08-13 Windows 真机（含加密 `/info`） | 重写后的 `crates/` 探针：`devices_ok count=3`、`discover_ok count=1`、`info_ok`（body 2009）、`pair_ok`（HAMK，`session_key_len=64`）、`channel_ok`（同连接加密 `GET /info`，body 2009）。日志见 `06`。未测 SETUP / 出声。 |
 | 里程碑 ② 可播放 CLI | ⏳ 待重写 | 首版实现已证实：①依据被不可信 AI 项目污染；②与研究文档不一致；③真机卡点（流 SETUP 无响应）未解。**代码已于 2026-08-12 全量删除**（git `a2898cb`，历史可溯 `937eca2`），待按清理后规范重写；真机事实见 `06` |
 | 里程碑 ③ 托盘 GUI | ⏳ | — |
 

@@ -1,4 +1,4 @@
-//! Probe CLI through the first test point: devices / discover / airplay / pair.
+//! Probe CLI: devices / discover / airplay / pair / channel.
 
 mod probe;
 
@@ -34,9 +34,14 @@ fn main() -> Result<()> {
                     let rt = tokio::runtime::Runtime::new()?;
                     rt.block_on(probe::pair(&target))
                 }
+                "channel" => {
+                    let target = args.next().context("usage: airplay probe channel <ip>[:port]")?;
+                    let rt = tokio::runtime::Runtime::new()?;
+                    rt.block_on(probe::channel(&target))
+                }
                 _ => {
                     bail!(
-                        "usage: airplay probe devices|discover|airplay <ip>[:port]|pair <ip>[:port]"
+                        "usage: airplay probe devices|discover|airplay <ip>[:port]|pair <ip>[:port]|channel <ip>[:port]"
                     )
                 }
             }

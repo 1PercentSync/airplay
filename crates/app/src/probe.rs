@@ -160,10 +160,44 @@ pub async fn pair(target: &str) -> Result<()> {
     let addr = parse_host_port(target, AIRPLAY_PORT).map_err(|e| anyhow::anyhow!("{e}"))?;
     let identity = Identity::generate().map_err(|e| anyhow::anyhow!("{e}"))?;
     info!("transient pair-setup {addr}");
-    let key = airplay_rtsp::transient_pair(addr, identity)
+    let mut rtsp = RtspClient::connect(addr, identity)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let key = airplay_rtsp::transient_pair(&mut rtsp)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("session_key_len={}", key.len());
     println!("[STATUS] pair_ok");
+    Ok(())
+}
+
+/// Pair on a new TCP, then encrypted GET /info on that same connection.
+pub async fn channel(target: &str) -> Result<()> {
+    let addr = parse_host_port(target, AIRPLAY_PORT).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let identity = Identity::generate().map_err(|e| anyhow::anyhow!("{e}"))?;
+    info!("control channel: pair then encrypted GET /info {addr}");
+    let mut rtsp = RtspClient::connect(addr, identity)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let key = airplay_rtsp::transient_pair(&mut rtsp)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    rtsp.enable_control_encryption(&key)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resp = rtsp
+        .request("GET", "/info", &[], None, &[])
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!(
+        "encrypted RTSP {} {}, body {} bytes",
+        resp.code,
+        resp.reason,
+        resp.body.len()
+    );
+    let value = plist_decode(&resp.body).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut pretty = String::new();
+    pretty_print_value(&value, 0, &mut pretty);
+    println!("{pretty}");
+    println!("[STATUS] channel_ok");
     Ok(())
 }

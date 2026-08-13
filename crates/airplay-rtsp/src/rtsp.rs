@@ -1,9 +1,11 @@
-//! Plaintext RTSP/1.0 client for probe `/info` and `/pair-setup`.
+//! RTSP/1.0 client: plaintext until pairing, then HAP frames on the same TCP.
 //!
-//! [evidence: pyatv support/rtsp.py:86-89,254-300; http.py:50-80,110-140;
-//! owntone airplay.c:889-933; raop_sender.cpp:545-567]
+//! [evidence: pyatv support/rtsp.py:86-89,254-300; http.py:385-387,457;
+//! owntone airplay.c:889-933,1005-1045,1453-1473;
+//! raop_sender.cpp:545-567,579-605]
 
 use airplay_core::{Error, Result, CLIENT_NAME, USER_AGENT};
+use airplay_crypto::hap::{HapCipher, FRAME_MAX};
 use airplay_crypto::random::{random_u32, random_u64};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -41,6 +43,8 @@ pub struct RtspClient {
     stream: TcpStream,
     cseq: u32,
     identity: Identity,
+    hap: Option<HapCipher>,
+    hap_plain: Vec<u8>,
 }
 
 impl RtspClient {
@@ -53,7 +57,16 @@ impl RtspClient {
             stream,
             cseq: 0,
             identity,
+            hap: None,
+            hap_plain: Vec::new(),
         })
+    }
+
+    /// Switch this TCP to HAP frames. Call after M4 on the same socket.
+    /// [evidence: owntone airplay.c:1453-1473; pyatv auth/__init__.py:107-115]
+    pub fn enable_control_encryption(&mut self, session_key: &[u8; 64]) -> Result<()> {
+        self.hap = Some(HapCipher::control(session_key)?);
+        Ok(())
     }
 
     pub async fn request(
@@ -86,14 +99,30 @@ impl RtspClient {
         let mut wire = msg.into_bytes();
         wire.extend_from_slice(body);
         tracing::debug!(method, uri, cseq, bytes = wire.len(), "rtsp send");
-        timeout(IO_TIMEOUT, self.stream.write_all(&wire))
-            .await
-            .map_err(|_| Error::Rtsp("write timed out".into()))?
-            .map_err(Error::from)?;
 
-        let resp = timeout(IO_TIMEOUT, read_response(&mut self.stream))
-            .await
-            .map_err(|_| Error::Rtsp("read timed out".into()))??;
+        if let Some(hap) = &mut self.hap {
+            let framed = hap.encrypt_message(&wire)?;
+            tracing::debug!(plain = wire.len(), framed = framed.len(), "hap write");
+            timeout(IO_TIMEOUT, self.stream.write_all(&framed))
+                .await
+                .map_err(|_| Error::Rtsp("write timed out".into()))?
+                .map_err(Error::from)?;
+        } else {
+            timeout(IO_TIMEOUT, self.stream.write_all(&wire))
+                .await
+                .map_err(|_| Error::Rtsp("write timed out".into()))?
+                .map_err(Error::from)?;
+        }
+
+        let resp = if self.hap.is_some() {
+            timeout(IO_TIMEOUT, self.read_encrypted_response())
+                .await
+                .map_err(|_| Error::Rtsp("read timed out".into()))??
+        } else {
+            timeout(IO_TIMEOUT, read_plaintext_response(&mut self.stream))
+                .await
+                .map_err(|_| Error::Rtsp("read timed out".into()))??
+        };
         if !(200..300).contains(&resp.code) {
             return Err(Error::Rtsp(format!(
                 "{method} {uri} failed: {} {}",
@@ -102,9 +131,46 @@ impl RtspClient {
         }
         Ok(resp)
     }
+
+    /// Decrypt HAP frames from TCP, then parse RTSP from the plaintext buffer.
+    /// Do not scan TCP for `\r\n\r\n` after encryption is on.
+    async fn read_encrypted_response(&mut self) -> Result<Response> {
+        loop {
+            if let Some((resp, used)) = try_parse_response(&self.hap_plain)? {
+                self.hap_plain.drain(..used);
+                return Ok(resp);
+            }
+            let mut hdr = [0u8; 2];
+            match self.stream.read_exact(&mut hdr).await {
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Err(Error::Rtsp("eof before HAP frame".into()));
+                }
+                Err(e) => return Err(e.into()),
+                Ok(_) => {}
+            }
+            let n = u16::from_le_bytes(hdr) as usize;
+            if n > FRAME_MAX {
+                return Err(Error::Rtsp(format!(
+                    "HAP frame plaintext {n} > {FRAME_MAX}"
+                )));
+            }
+            let mut rest = vec![0u8; n + 16];
+            self.stream.read_exact(&mut rest).await?;
+            let hap = self
+                .hap
+                .as_mut()
+                .ok_or_else(|| Error::Rtsp("HAP cipher missing".into()))?;
+            let chunk = hap.decrypt_frame(hdr, &rest)?;
+            tracing::debug!(n, plain = chunk.len(), "hap decrypt frame");
+            self.hap_plain.extend_from_slice(&chunk);
+            if self.hap_plain.len() > 256 * 1024 {
+                return Err(Error::Rtsp("decrypted RTSP too large".into()));
+            }
+        }
+    }
 }
 
-async fn read_response(stream: &mut TcpStream) -> Result<Response> {
+async fn read_plaintext_response(stream: &mut TcpStream) -> Result<Response> {
     let mut buf = Vec::new();
     loop {
         let mut byte = [0u8; 1];
@@ -120,7 +186,42 @@ async fn read_response(stream: &mut TcpStream) -> Result<Response> {
             return Err(Error::Rtsp("headers too large".into()));
         }
     }
-    let header_text = String::from_utf8_lossy(&buf);
+    let (headers, reason, code, len) = parse_header_block(&buf)?;
+    let mut body = vec![0u8; len];
+    if len > 0 {
+        stream.read_exact(&mut body).await?;
+    }
+    Ok(Response {
+        code,
+        reason,
+        headers,
+        body,
+    })
+}
+
+fn try_parse_response(buf: &[u8]) -> Result<Option<(Response, usize)>> {
+    let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return Ok(None);
+    };
+    let header_end = end + 4;
+    let (headers, reason, code, len) = parse_header_block(&buf[..header_end])?;
+    if buf.len() < header_end + len {
+        return Ok(None);
+    }
+    let body = buf[header_end..header_end + len].to_vec();
+    Ok(Some((
+        Response {
+            code,
+            reason,
+            headers,
+            body,
+        },
+        header_end + len,
+    )))
+}
+
+fn parse_header_block(buf: &[u8]) -> Result<(HashMap<String, String>, String, u16, usize)> {
+    let header_text = String::from_utf8_lossy(buf);
     let mut lines = header_text.split("\r\n");
     let status = lines.next().unwrap_or("");
     let mut parts = status.splitn(3, ' ');
@@ -146,16 +247,7 @@ async fn read_response(stream: &mut TcpStream) -> Result<Response> {
         .get("content-length")
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(0);
-    let mut body = vec![0u8; len];
-    if len > 0 {
-        stream.read_exact(&mut body).await?;
-    }
-    Ok(Response {
-        code,
-        reason,
-        headers,
-        body,
-    })
+    Ok((headers, reason, code, len))
 }
 
 pub fn parse_host_port(spec: &str, default_port: u16) -> Result<SocketAddr> {
