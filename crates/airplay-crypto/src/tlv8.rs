@@ -60,7 +60,9 @@ pub fn decode(data: &[u8]) -> Result<TlvMap> {
             return Err(Error::Tlv("truncated TLV value".into()));
         }
         let chunk = &data[i + 2..i + 2 + len];
-        map.entry(tag).or_insert_with(Vec::new).extend_from_slice(chunk);
+        map.entry(tag)
+            .or_insert_with(Vec::new)
+            .extend_from_slice(chunk);
         i += 2 + len;
     }
     Ok(map)

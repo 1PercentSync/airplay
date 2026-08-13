@@ -4,6 +4,7 @@ members = [
     "crates/airplay-core",
     "crates/airplay-crypto",
     "crates/airplay-rtsp",
+    "crates/airplay-stream",
     "crates/audio-pipe",
     "crates/app",
 ]
@@ -20,7 +21,9 @@ sha2 = "0.11"
 hkdf = "0.13"
 chacha20poly1305 = "0.11"
 num-bigint = "0.5"
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "signal", "time"] }
+rubato = "5.0"
+audioadapter-buffers = "5.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 mdns-sd = "0.21"

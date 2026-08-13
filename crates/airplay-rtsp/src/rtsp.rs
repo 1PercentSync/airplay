@@ -69,7 +69,36 @@ impl RtspClient {
         Ok(())
     }
 
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        self.stream.local_addr().map_err(Error::from)
+    }
+
+    pub fn peer_addr(&self) -> Result<SocketAddr> {
+        self.stream.peer_addr().map_err(Error::from)
+    }
+
     pub async fn request(
+        &mut self,
+        method: &str,
+        uri: &str,
+        extra: &[(&str, &str)],
+        content_type: Option<&str>,
+        body: &[u8],
+    ) -> Result<Response> {
+        let resp = self
+            .exchange(method, uri, extra, content_type, body)
+            .await?;
+        if !(200..300).contains(&resp.code) {
+            return Err(Error::Rtsp(format!(
+                "{method} {uri} failed: {} {}",
+                resp.code, resp.reason
+            )));
+        }
+        Ok(resp)
+    }
+
+    /// Send and read without requiring 2xx. Used for best-effort `/feedback` and TEARDOWN.
+    pub async fn exchange(
         &mut self,
         method: &str,
         uri: &str,
@@ -83,7 +112,10 @@ impl RtspClient {
         msg.push_str(&format!("CSeq: {cseq}\r\n"));
         msg.push_str(&format!("User-Agent: {USER_AGENT}\r\n"));
         msg.push_str(&format!("DACP-ID: {}\r\n", self.identity.dacp_id));
-        msg.push_str(&format!("Active-Remote: {}\r\n", self.identity.active_remote));
+        msg.push_str(&format!(
+            "Active-Remote: {}\r\n",
+            self.identity.active_remote
+        ));
         msg.push_str(&format!("Client-Instance: {}\r\n", self.identity.dacp_id));
         msg.push_str(&format!("X-Apple-Client-Name: {CLIENT_NAME}\r\n"));
         for (k, v) in extra {
@@ -114,22 +146,15 @@ impl RtspClient {
                 .map_err(Error::from)?;
         }
 
-        let resp = if self.hap.is_some() {
+        if self.hap.is_some() {
             timeout(IO_TIMEOUT, self.read_encrypted_response())
                 .await
-                .map_err(|_| Error::Rtsp("read timed out".into()))??
+                .map_err(|_| Error::Rtsp("read timed out".into()))?
         } else {
             timeout(IO_TIMEOUT, read_plaintext_response(&mut self.stream))
                 .await
-                .map_err(|_| Error::Rtsp("read timed out".into()))??
-        };
-        if !(200..300).contains(&resp.code) {
-            return Err(Error::Rtsp(format!(
-                "{method} {uri} failed: {} {}",
-                resp.code, resp.reason
-            )));
+                .map_err(|_| Error::Rtsp("read timed out".into()))?
         }
-        Ok(resp)
     }
 
     /// Decrypt HAP frames from TCP, then parse RTSP from the plaintext buffer.

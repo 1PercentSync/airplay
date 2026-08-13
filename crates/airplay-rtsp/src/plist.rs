@@ -79,6 +79,20 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            Value::Int(i) => Some(i.bits as u64),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[Value]> {
+        match self {
+            Value::Array(a) => Some(a),
+            _ => None,
+        }
+    }
 }
 
 pub fn decode(data: &[u8]) -> Result<Value> {
@@ -97,9 +111,7 @@ pub fn decode(data: &[u8]) -> Result<Value> {
     if num_objects == 0 || num_objects > data.len() {
         return Err(Error::Plist("bad numObjects".into()));
     }
-    if offset_table > data.len()
-        || num_objects > (data.len() - offset_table) / offset_size.max(1)
-    {
+    if offset_table > data.len() || num_objects > (data.len() - offset_table) / offset_size.max(1) {
         return Err(Error::Plist("offset table out of range".into()));
     }
     let mut offsets = Vec::with_capacity(num_objects);
@@ -175,7 +187,9 @@ impl<'a> Decoder<'a> {
             }
             0x40 => {
                 let (cnt, pos) = self.read_count(lo, pos)?;
-                let end = pos.checked_add(cnt).ok_or_else(|| Error::Plist("data overflow".into()))?;
+                let end = pos
+                    .checked_add(cnt)
+                    .ok_or_else(|| Error::Plist("data overflow".into()))?;
                 if end > self.data.len() {
                     return Err(Error::Plist("data truncated".into()));
                 }
@@ -183,16 +197,24 @@ impl<'a> Decoder<'a> {
             }
             0x50 => {
                 let (cnt, pos) = self.read_count(lo, pos)?;
-                let end = pos.checked_add(cnt).ok_or_else(|| Error::Plist("ascii overflow".into()))?;
+                let end = pos
+                    .checked_add(cnt)
+                    .ok_or_else(|| Error::Plist("ascii overflow".into()))?;
                 if end > self.data.len() {
                     return Err(Error::Plist("ascii truncated".into()));
                 }
-                Ok(Value::String(String::from_utf8_lossy(&self.data[pos..end]).into_owned()))
+                Ok(Value::String(
+                    String::from_utf8_lossy(&self.data[pos..end]).into_owned(),
+                ))
             }
             0x60 => {
                 let (cnt, pos) = self.read_count(lo, pos)?;
-                let nbytes = cnt.checked_mul(2).ok_or_else(|| Error::Plist("utf16 overflow".into()))?;
-                let end = pos.checked_add(nbytes).ok_or_else(|| Error::Plist("utf16 overflow".into()))?;
+                let nbytes = cnt
+                    .checked_mul(2)
+                    .ok_or_else(|| Error::Plist("utf16 overflow".into()))?;
+                let end = pos
+                    .checked_add(nbytes)
+                    .ok_or_else(|| Error::Plist("utf16 overflow".into()))?;
                 if end > self.data.len() {
                     return Err(Error::Plist("utf16 truncated".into()));
                 }
@@ -397,7 +419,11 @@ fn encode_object(objects: &mut Vec<Vec<u8>>, v: &Value, ref_size: usize) -> Resu
             let mut krefs = Vec::new();
             let mut vrefs = Vec::new();
             for (k, val) in pairs {
-                krefs.push(encode_add_sized(objects, &Value::String(k.clone()), ref_size)?);
+                krefs.push(encode_add_sized(
+                    objects,
+                    &Value::String(k.clone()),
+                    ref_size,
+                )?);
                 vrefs.push(encode_add_sized(objects, val, ref_size)?);
             }
             encode_marker_len(&mut obj, 0xD0, pairs.len())?;

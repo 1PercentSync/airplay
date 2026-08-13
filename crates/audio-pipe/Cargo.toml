@@ -6,6 +6,11 @@ license.workspace = true
 
 [dependencies]
 airplay-core = { path = "../airplay-core" }
+airplay-crypto = { path = "../airplay-crypto" }
+airplay-stream = { path = "../airplay-stream" }
+rubato.workspace = true
+audioadapter-buffers.workspace = true
+tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
@@ -16,4 +21,5 @@ windows = { workspace = true, features = [
     "Win32_Devices_FunctionDiscovery",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_System_Variant",
+    "Win32_System_Threading",
 ] }

@@ -1,6 +1,7 @@
-//! Probe CLI: devices / discover / airplay / pair / channel.
+//! CLI: probe commands and playable `run`.
 
 mod probe;
+mod run;
 
 use anyhow::{bail, Context, Result};
 
@@ -25,17 +26,23 @@ fn main() -> Result<()> {
                     rt.block_on(probe::discover())
                 }
                 "airplay" => {
-                    let target = args.next().context("usage: airplay probe airplay <ip>[:port]")?;
+                    let target = args
+                        .next()
+                        .context("usage: airplay probe airplay <ip>[:port]")?;
                     let rt = tokio::runtime::Runtime::new()?;
                     rt.block_on(probe::airplay(&target))
                 }
                 "pair" => {
-                    let target = args.next().context("usage: airplay probe pair <ip>[:port]")?;
+                    let target = args
+                        .next()
+                        .context("usage: airplay probe pair <ip>[:port]")?;
                     let rt = tokio::runtime::Runtime::new()?;
                     rt.block_on(probe::pair(&target))
                 }
                 "channel" => {
-                    let target = args.next().context("usage: airplay probe channel <ip>[:port]")?;
+                    let target = args
+                        .next()
+                        .context("usage: airplay probe channel <ip>[:port]")?;
                     let rt = tokio::runtime::Runtime::new()?;
                     rt.block_on(probe::channel(&target))
                 }
@@ -46,6 +53,14 @@ fn main() -> Result<()> {
                 }
             }
         }
-        _ => bail!("usage: airplay probe …"),
+        "run" => {
+            let target = args
+                .next()
+                .context("usage: airplay run <ip>[:port] [capture-device]")?;
+            let device = args.next();
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(run::run(&target, device.as_deref()))
+        }
+        _ => bail!("usage: airplay probe … | airplay run <ip>[:port] [capture-device]"),
     }
 }

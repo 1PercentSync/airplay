@@ -129,7 +129,10 @@ impl SrpClient {
 
     pub fn process_challenge(&mut self, salt: &[u8], server_b: &[u8]) -> Result<()> {
         if salt.len() != 16 {
-            return Err(Error::Srp(format!("salt must be 16 bytes, got {}", salt.len())));
+            return Err(Error::Srp(format!(
+                "salt must be 16 bytes, got {}",
+                salt.len()
+            )));
         }
         if server_b.len() > N_BYTES {
             return Err(Error::Srp(format!("B longer than {N_BYTES} bytes")));
@@ -149,14 +152,16 @@ impl SrpClient {
         // [evidence: raop_sender airplay_crypto.cpp:338-350; RFC 5054]
         let gx = g().modpow(&x, n());
         let kgx = (&k * &gx) % n();
-        let base_i = BigInt::from_biguint(Sign::Plus, b.clone())
-            - BigInt::from_biguint(Sign::Plus, kgx);
+        let base_i =
+            BigInt::from_biguint(Sign::Plus, b.clone()) - BigInt::from_biguint(Sign::Plus, kgx);
         let n_i = BigInt::from_biguint(Sign::Plus, n().clone());
         let mut base_i = base_i % &n_i;
         if base_i.sign() == Sign::Minus {
             base_i += &n_i;
         }
-        let base = base_i.to_biguint().ok_or_else(|| Error::Srp("S base not unsigned".into()))?;
+        let base = base_i
+            .to_biguint()
+            .ok_or_else(|| Error::Srp("S base not unsigned".into()))?;
         let exp = &self.a + &u * &x;
         let s = base.modpow(&exp, n());
         let k_sess = hash_num(&s);
@@ -188,7 +193,9 @@ impl SrpClient {
     }
 
     pub fn proof_m1(&self) -> Result<&[u8; 64]> {
-        self.m1.as_ref().ok_or_else(|| Error::Srp("process_challenge not called".into()))
+        self.m1
+            .as_ref()
+            .ok_or_else(|| Error::Srp("process_challenge not called".into()))
     }
 
     pub fn session_key(&self) -> Result<&[u8; 64]> {

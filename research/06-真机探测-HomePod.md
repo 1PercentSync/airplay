@@ -1,6 +1,6 @@
 # 研究笔记 06：真机探测事实（HomePod gen 2，192.168.1.12）
 
-> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。更早一份探针因未对每一特性读全参考被删（勿通过 git 回看 `545e2d8`）。下列设备事实以 2026-08-13 重写探针的 Windows 真机跑分为准。
+> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。更早一份探针因未对每一特性读全参考被删（勿通过 git 回看 `545e2d8`）。下列设备事实以 2026-08-13 重写探针与可播放 `run` 的 Windows 真机跑分为准。
 
 ## 2026-08-13 重写探针（当前 `crates/`）
 
@@ -22,9 +22,27 @@
 
 15:02 日志 `logs/probe-20260813-150235.log`：`failed_steps=0`。`probe channel` 先完成 M1–M4（HAMK ok），再打印 `encrypted RTSP 200 OK, body 2009 bytes` 和 `[STATUS] channel_ok`。这证实本机 HomePod 接受同连接控制通道加密。构建用的是工作区未提交代码（日志里 `git=f30cc35` 只是当时 HEAD）。
 
-**还没测到的**：session/stream SETUP、RECORD、NTP、出声。
+设备能力与声卡表见下。可播放 `run` 见下一节。
 
-设备能力与声卡表与此前一致（见下）。
+## 2026-08-13 可播放 `run`（当前 `crates/`）
+
+用户 Windows：`target\release\airplay.exe run 192.168.1.12`。用户确认 HomePod 正常出声。
+
+| 步骤 | 日志 |
+|---|---|
+| 明文 GET `/info` | HomePod For Alex，AudioAccessory6,1，`initialVolume: -15`，`keepAliveSendStatsAsBody: true` |
+| transient M1–M4 | HAMK ok，`session_key_len=64` |
+| 会话 SETUP | 200；body `{ skipRecord: true, eventPort: 49213 }`；无 Session 头（`session=None`） |
+| 事件通道 | `connected addr=192.168.1.12:49213 attempt=1` |
+| 流 SETUP | 200；`dataPort=58699`，`controlPort=55348`；ALAC `ct=2` / `audioFormat=0x40000` |
+| timing | `first timing 0xD2 peer=192.168.1.12:50325`（在流 SETUP 完成前） |
+| RECORD / 采集 | `[STATUS] setup_ok` 后绑 Steam Streaming Speakers，48k/2ch/f32 |
+| RTP | `first RTP sent`；`rtp_10s=1252..1253`（44100/352≈125.3 包/秒）；`q_drop=0` `pkt_drop=0` `rtx=0` `ka_miss=0`；`cap_disc=2`（开流时 WASAPI discontinuity，未再涨） |
+| TEARDOWN | ctrl-c 后 code=200 |
+
+此前同一条 `run` 灯亮无声：`rtp_sent` 约 65 包/秒，`q_drop` 持续上涨。改发送节拍与 TPDF 后包速对齐，出声。`skipRecord=true` 时仍发了 RECORD，出声成立——该字段不在在册参考里，不能当成「不要 RECORD」。无 Session 头时 SET_PARAMETER / RECORD / TEARDOWN 仍 2xx。
+
+实验队列 §14：变量 #1（流 SETUP 先于 RECORD）已过；PCM 变量未用；防火墙嫌疑因 0xD2 到达而排除。
 
 ## 设备事实
 
@@ -40,7 +58,7 @@
 | supportedFormats.audioStream | 0x1440800 | realtime 广告仅含 0x40000（44.1/16/2）= 我们四格式中唯一；48k/24bit **未广告** → 决策 C 基线 44.1/16/2 被设备确认，hi-res 对 realtime 不适用 |
 | supportedAudioFormatsExtended | 仅 bufferStream（34 项 codec 枚举） | 与 buffered 放弃决策一致，不利用 |
 | keepAliveSendStatsAsBody | true | 设备广告支持统计 body；但 pyatv/owntone 均以**空 body** /feedback 真机服役 `[代码: pyatv support/rtsp.py:246; owntone airplay.c:3701]` → 空 body 起步，统计 body 为可选增强 |
-| initialVolume | -26.25 dB | 接收端初始音量 |
+| initialVolume | 本次 `run` 的 `/info` 为 -15 dB（探针时期记过 -26.25） | 接收端广告值会变；本份 `run` 默认音量 0.5 → -15 dB |
 | volumeControlType | 3 | SET_PARAMETER 绝对音量可用 |
 | senderAddress | 192.168.1.100:52459 | 用户 PC 与 HomePod 同子网（端口为本次 `/info` 连接的本地口） |
 

@@ -1,7 +1,5 @@
 use airplay_core::{AIRPLAY_PORT, MDNS_BROWSE_SECS};
-use airplay_rtsp::{
-    parse_host_port, plist_decode, pretty_print_value, Identity, RtspClient,
-};
+use airplay_rtsp::{parse_host_port, plist_decode, pretty_print_value, Identity, RtspClient};
 use anyhow::Result;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use std::collections::HashMap;
@@ -42,11 +40,7 @@ pub async fn discover() -> Result<()> {
                 if !svc.is_valid() {
                     continue;
                 }
-                let mut addrs: Vec<IpAddr> = svc
-                    .addresses
-                    .iter()
-                    .filter_map(scoped_ip)
-                    .collect();
+                let mut addrs: Vec<IpAddr> = svc.addresses.iter().filter_map(scoped_ip).collect();
                 addrs.sort_by_key(|a| match a {
                     IpAddr::V4(_) => 0u8,
                     IpAddr::V6(_) => 1,
@@ -61,10 +55,22 @@ pub async fn discover() -> Result<()> {
                         port: svc.port,
                         addrs,
                         model: txt.get_property_val_str("model").unwrap_or("").to_string(),
-                        deviceid: txt.get_property_val_str("deviceid").unwrap_or("").to_string(),
-                        features: txt.get_property_val_str("features").unwrap_or("").to_string(),
-                        srcvers: txt.get_property_val_str("srcvers").unwrap_or("").to_string(),
-                        protovers: txt.get_property_val_str("protovers").unwrap_or("").to_string(),
+                        deviceid: txt
+                            .get_property_val_str("deviceid")
+                            .unwrap_or("")
+                            .to_string(),
+                        features: txt
+                            .get_property_val_str("features")
+                            .unwrap_or("")
+                            .to_string(),
+                        srcvers: txt
+                            .get_property_val_str("srcvers")
+                            .unwrap_or("")
+                            .to_string(),
+                        protovers: txt
+                            .get_property_val_str("protovers")
+                            .unwrap_or("")
+                            .to_string(),
                         osvers: txt.get_property_val_str("osvers").unwrap_or("").to_string(),
                     },
                 );
@@ -86,11 +92,7 @@ pub async fn discover() -> Result<()> {
             .iter()
             .find(|a| a.is_ipv4())
             .or_else(|| d.addrs.first());
-        let name = d
-            .fullname
-            .split("._airplay")
-            .next()
-            .unwrap_or(&d.fullname);
+        let name = d.fullname.split("._airplay").next().unwrap_or(&d.fullname);
         println!("Name       : {name}");
         println!("Host       : {}", d.host);
         println!("Port       : {}", d.port);

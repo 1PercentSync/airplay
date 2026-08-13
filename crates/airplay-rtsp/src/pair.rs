@@ -26,9 +26,10 @@ pub async fn transient_pair(rtsp: &mut RtspClient) -> Result<[u8; 64]> {
     if let Some(err) = tlv8::get_u8(&t2, TlvType::ERROR) {
         return Err(Error::Pair(format!("M2 TLV error {err}")));
     }
-    let salt = tlv8::get(&t2, TlvType::SALT).ok_or_else(|| Error::Pair("M2 missing Salt".into()))?;
-    let pk_b =
-        tlv8::get(&t2, TlvType::PUBLIC_KEY).ok_or_else(|| Error::Pair("M2 missing PublicKey".into()))?;
+    let salt =
+        tlv8::get(&t2, TlvType::SALT).ok_or_else(|| Error::Pair("M2 missing Salt".into()))?;
+    let pk_b = tlv8::get(&t2, TlvType::PUBLIC_KEY)
+        .ok_or_else(|| Error::Pair("M2 missing PublicKey".into()))?;
     let st = tlv8::get_u8(&t2, TlvType::STATE).unwrap_or(0);
     info!(
         "M2 recv State={st} Salt={}B PublicKey={}B",

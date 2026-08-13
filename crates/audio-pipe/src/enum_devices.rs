@@ -1,6 +1,6 @@
-use airplay_core::Result;
 #[cfg(not(windows))]
 use airplay_core::Error;
+use airplay_core::Result;
 
 #[derive(Clone, Debug)]
 pub struct RenderDevice {

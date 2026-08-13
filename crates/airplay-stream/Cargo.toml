@@ -1,0 +1,9 @@
+[package]
+name = "airplay-stream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+airplay-core = { path = "../airplay-core" }
+chacha20poly1305.workspace = true

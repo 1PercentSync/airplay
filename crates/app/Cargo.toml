@@ -12,6 +12,7 @@ path = "src/main.rs"
 airplay-core = { path = "../airplay-core" }
 airplay-crypto = { path = "../airplay-crypto" }
 airplay-rtsp = { path = "../airplay-rtsp" }
+airplay-stream = { path = "../airplay-stream" }
 audio-pipe = { path = "../audio-pipe" }
 anyhow.workspace = true
 mdns-sd.workspace = true

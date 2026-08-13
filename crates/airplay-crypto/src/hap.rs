@@ -20,12 +20,15 @@ use sha2::Sha512;
 pub const FRAME_MAX: usize = 1024;
 const TAG_LEN: usize = 16;
 
-const SALT: &[u8] = b"Control-Salt";
-const WRITE_INFO: &[u8] = b"Control-Write-Encryption-Key";
-const READ_INFO: &[u8] = b"Control-Read-Encryption-Key";
+const CONTROL_SALT: &[u8] = b"Control-Salt";
+const CONTROL_WRITE: &[u8] = b"Control-Write-Encryption-Key";
+const CONTROL_READ: &[u8] = b"Control-Read-Encryption-Key";
+const EVENTS_SALT: &[u8] = b"Events-Salt";
+const EVENTS_WRITE: &[u8] = b"Events-Write-Encryption-Key";
+const EVENTS_READ: &[u8] = b"Events-Read-Encryption-Key";
 
-fn hkdf32(ikm: &[u8], info: &[u8]) -> Result<[u8; 32]> {
-    let hk = Hkdf::<Sha512>::new(Some(SALT), ikm);
+fn hkdf32(ikm: &[u8], salt: &[u8], info: &[u8]) -> Result<[u8; 32]> {
+    let hk = Hkdf::<Sha512>::new(Some(salt), ikm);
     let mut okm = [0u8; 32];
     hk.expand(info, &mut okm)
         .map_err(|_| Error::Crypto("HKDF expand failed".into()))?;
@@ -54,8 +57,27 @@ impl HapCipher {
                 ikm.len()
             )));
         }
-        let w = hkdf32(ikm, WRITE_INFO)?;
-        let r = hkdf32(ikm, READ_INFO)?;
+        let w = hkdf32(ikm, CONTROL_SALT, CONTROL_WRITE)?;
+        let r = hkdf32(ikm, CONTROL_SALT, CONTROL_READ)?;
+        Ok(Self {
+            write: ChaCha20Poly1305::new((&w).into()),
+            read: ChaCha20Poly1305::new((&r).into()),
+            send_ctr: 0,
+            recv_ctr: 0,
+        })
+    }
+
+    /// Event channel (reverse TCP). Write/Read infos are swapped vs control.
+    /// [evidence: owntone pair_homekit.c:2900-2910; pyatv airplayv2.py:88-95]
+    pub fn events(ikm: &[u8]) -> Result<Self> {
+        if ikm.len() != 64 {
+            return Err(Error::Crypto(format!(
+                "events IKM must be 64 bytes, got {}",
+                ikm.len()
+            )));
+        }
+        let w = hkdf32(ikm, EVENTS_SALT, EVENTS_READ)?;
+        let r = hkdf32(ikm, EVENTS_SALT, EVENTS_WRITE)?;
         Ok(Self {
             write: ChaCha20Poly1305::new((&w).into()),
             read: ChaCha20Poly1305::new((&r).into()),
@@ -97,7 +119,9 @@ impl HapCipher {
     pub fn decrypt_frame(&mut self, n_le: [u8; 2], ct_and_tag: &[u8]) -> Result<Vec<u8>> {
         let n = u16::from_le_bytes(n_le) as usize;
         if n > FRAME_MAX {
-            return Err(Error::Crypto(format!("HAP frame plaintext {n} > {FRAME_MAX}")));
+            return Err(Error::Crypto(format!(
+                "HAP frame plaintext {n} > {FRAME_MAX}"
+            )));
         }
         if ct_and_tag.len() != n + TAG_LEN {
             return Err(Error::Crypto(format!(
@@ -157,13 +181,7 @@ mod tests {
         ];
         let cipher = ChaCha20Poly1305::new((&key).into());
         let got = cipher
-            .encrypt(
-                &nonce,
-                Payload {
-                    msg: pt,
-                    aad: &aad,
-                },
-            )
+            .encrypt(&nonce, Payload { msg: pt, aad: &aad })
             .expect("encrypt");
         assert_eq!(got, want);
     }
