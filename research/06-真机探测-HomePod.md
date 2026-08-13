@@ -1,22 +1,25 @@
 # 研究笔记 06：真机探测事实（HomePod gen 2，192.168.1.12）
 
-> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。2026-08-13 是清理后重写探针在同一台设备上的复测。
+> 设备能力以真机 `GET /info` 为准。2026-08-12 的可播放迭代属于**已删除实现**（git `a2898cb`）。2026-08-13 探针复测的设备事实仍有效；写出该探针的代码因未对每一特性读全参考，用户视为受污染，**已全量删除**（勿通过 git 回看 `545e2d8`）。
 
-## 2026-08-13 清理后探针复测（本份代码）
+## 2026-08-13 探针复测（代码已删；下表是设备/声卡事实）
 
-用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑完三件套。成功行如下。
+用户在 Windows 构建 `target\release\airplay.exe`，对 `192.168.1.12` 跑完三件套，随后加测 mDNS 发现。成功行如下。
 
 | 命令 | 成功行 | 证实了什么 |
 |---|---|---|
 | `probe devices` | `[STATUS] devices_ok count=3` | WASAPI 枚举与 `GetMixFormat` 可用 |
 | `probe airplay 192.168.1.12` | `[STATUS] info_ok` | 明文 `GET /info` 返回 200，body 2009 字节，bplist 可解析 |
 | `probe pair 192.168.1.12` | `[STATUS] pair_ok` | transient M1–M4，HAMK 通过，`session_key_len=64` |
+| `probe discover` | `[STATUS] discover_ok count=1` | 浏览 `_airplay._tcp` 5 秒，扫到同一台 HomePod |
+
+`probe discover` 输出：名称 HomePod For Alex；端口 7000；IPv4 `192.168.1.12`（另有两条 ULA IPv6 与一条 `fe80` 链路本地）；`Use : 192.168.1.12:7000`；TXT `model=AudioAccessory6,1`、`deviceid=8E:35:21:D6:F9:74`、`features=0x4A7FCA00,0x3C354BD0`、`srcvers=980.71.1`、`protovers=1.1`、`osvers=27.0`。与先前手动 IP 和 `/info` 一致。
 
 命令行：M1 发送 State=1, Method=0, Flags=16；M2 收到 State=2, Salt=16B, PublicKey=384B；M3 发送 State=3, PublicKey=384B, Proof=64B；M4 收到 State=4, Proof=64B；HAMK ok。未发 `/pair-pin-start`。
 
 **这次没测到的**：加密 RTSP、session/stream SETUP、RECORD、NTP、出声。
 
-设备能力与声卡表与 2026-08-12 一致（见下）。Windows 编译曾因 packed `WAVEFORMATEX` 在 `format!` 里取字段引用报 E0793，已改为先拷到局部变量。
+设备能力与声卡表与 2026-08-12 一致（见下）。当时 Windows 编译曾因 packed `WAVEFORMATEX` 在 `format!` 里取字段引用报 E0793。
 
 显示问题：`supportedFormats.bufferStream` 打成 `-577021992844656640 (0xfffffffffffffffff7fe018e00e80000)`。这是 8 字节 plist 整数按有符号展开后的十六进制，不是解码失败。按 64 位位型看是 `0xf7fe018e00e80000`。决策 B 不用 bufferStream。
 
@@ -25,7 +28,8 @@
 | 项 | 值 | 含义/影响 |
 |---|---|---|
 | model | AudioAccessory6,1 | HomePod gen 2 |
-| sourceVersion | 980.71.1（osBuild 24J5325d） | 现代 audioOS |
+| deviceid（mDNS TXT） | 8E:35:21:D6:F9:74 | 2026-08-13 `probe discover` |
+| sourceVersion | 980.71.1（osBuild 24J5325d；TXT osvers=27.0） | 现代 audioOS |
 | protocolVersion | "1.1" | AP2 音频（RAOP-over-AP2）路线适用 |
 | features | 0x3C354BD04A7FCA00 | bit9 Audio、bit18-21 AudioFormats、bit38 AP2、bit40 Buffered、bit41 PTP、bit46 HKPairing、bit48 UnifiedScreen |
 | statusFlags | 0x98404 | bit2（PinRequired 标注位）置位 + pk 存在——**但 transient 仍全流程成功**：statusFlags/pk 不阻止 transient pair-setup（该 HomePod 访问控制=所有人）。推翻了"现代 HomePod 上 transient 不可用"的担忧 |
