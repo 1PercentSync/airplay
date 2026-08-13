@@ -48,7 +48,7 @@
 
 | 仓库 | SHA（溯源用） | 移除理由 |
 |---|---|---|
-| music-assistant/airplay-cli | bf57f69939628312d8b9a585502fffe80df7dcf2 | AI 生成特征明显（数千行 + "某日在某设备 A/B 验证"式不可证伪叙事）；其协议结论已逐条重锚 A 级或降级（见 research/07） |
+| music-assistant/airplay-cli | bf57f69939628312d8b9a585502fffe80df7dcf2 | AI 生成特征明显（数千行 + "某日在某设备 A/B 验证"式不可证伪叙事）；其协议结论已逐条重锚 A 级或降级（见 research/archive/07） |
 | music-assistant/cliairplay | 81a4413abf1254f1045f7cfa26c1543276598d3c | 同组织、airplay-cli 前身，同嫌疑 |
 | Pabldi08/AirSend | ee55c8d5d2aa15959bd7e936a73fe9ff7d487758 | 决策 A 已判 AI 代码不可信（事件通道缺陷证伪） |
 | Pabldi08/airplay2-rs | 1baeaae336ca3a9828e732500082f5fd1767d2fd | 同上（AirSend 实际依赖的协议栈） |
