@@ -320,9 +320,23 @@ pub async fn run_session(
     .await
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    rtsp.request("RECORD", &uri, &extra_ref, None, &[])
+    let resp = rtsp
+        .request("RECORD", &uri, &extra_ref, None, &[])
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut record_headers: Vec<_> = resp.headers.iter().collect();
+    record_headers.sort_by(|a, b| a.0.cmp(b.0));
+    let record_headers = record_headers
+        .into_iter()
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    info!(
+        code = resp.code,
+        audio_latency = resp.headers.get("audio-latency").map(String::as_str),
+        headers = record_headers.as_str(),
+        "RECORD"
+    );
     status("[STATUS] setup_ok");
 
     let rtp_sent = Arc::new(AtomicU64::new(0));
