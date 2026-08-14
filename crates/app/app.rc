@@ -1,0 +1,5 @@
+// Resource 1 is the exe icon (Explorer shows the first icon resource):
+// black glyph, visible on light backgrounds.
+// Resource 2 is the tray icon: white glyph, visible on the dark taskbar.
+1 ICON "assets/airplay-black.ico"
+2 ICON "assets/airplay-white.ico"
