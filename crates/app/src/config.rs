@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
+use airplay_stream::{nearest_latency_preset, LATENCY_FRAMES};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -15,6 +16,8 @@ pub struct Config {
     pub play: bool,
     pub sunshine_aware: bool,
     pub autostart: bool,
+    pub latency_frames: u32,
+    pub api_port: u16,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -32,11 +35,43 @@ struct CaptureFile {
 }
 
 #[derive(Serialize, Deserialize)]
+struct StreamFile {
+    #[serde(default = "default_latency_frames")]
+    latency_frames: u32,
+}
+
+impl Default for StreamFile {
+    fn default() -> Self {
+        Self {
+            latency_frames: LATENCY_FRAMES,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct ApiFile {
+    #[serde(default = "default_api_port")]
+    port: u16,
+}
+
+impl Default for ApiFile {
+    fn default() -> Self {
+        Self {
+            port: default_api_port(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 struct FileCfg {
     #[serde(default)]
     device: DeviceFile,
     #[serde(default)]
     capture: CaptureFile,
+    #[serde(default)]
+    stream: StreamFile,
+    #[serde(default)]
+    api: ApiFile,
     #[serde(default = "default_volume")]
     volume: f64,
     #[serde(default)]
@@ -55,6 +90,14 @@ fn default_sunshine_aware() -> bool {
     true
 }
 
+fn default_latency_frames() -> u32 {
+    LATENCY_FRAMES
+}
+
+fn default_api_port() -> u16 {
+    crate::api::DEFAULT_PORT
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -65,6 +108,8 @@ impl Default for Config {
             play: false,
             sunshine_aware: true,
             autostart: false,
+            latency_frames: LATENCY_FRAMES,
+            api_port: default_api_port(),
         }
     }
 }
@@ -89,6 +134,12 @@ impl Config {
                     play: f.play,
                     sunshine_aware: f.sunshine_aware,
                     autostart: f.autostart,
+                    latency_frames: nearest_latency_preset(f.stream.latency_frames),
+                    api_port: if f.api.port == 0 {
+                        default_api_port()
+                    } else {
+                        f.api.port
+                    },
                 },
                 Err(_) => Self::default(),
             },
@@ -105,6 +156,12 @@ impl Config {
             },
             capture: CaptureFile {
                 device_name: self.capture_device.clone(),
+            },
+            stream: StreamFile {
+                latency_frames: nearest_latency_preset(self.latency_frames),
+            },
+            api: ApiFile {
+                port: self.api_port,
             },
             volume: self.volume.clamp(0.0, 1.0),
             play: self.play,

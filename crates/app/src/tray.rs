@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::probe::{self, Discovered};
 use crate::run::{self, SessionCtrl};
 use crate::sunshine;
+use airplay_stream::{latency_preset_label, LATENCY_PRESETS};
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,6 +42,7 @@ const ID_AUTOSTART: u16 = 1006;
 const ID_VOL_BASE: u16 = 1100;
 const ID_DEV_BASE: u16 = 1200;
 const ID_CAP_BASE: u16 = 1300;
+const ID_LAT_BASE: u16 = 1400;
 
 enum Cmd {
     Start,
@@ -50,6 +52,7 @@ enum Cmd {
     SelectCapture(String),
     SetSunshineAware(bool),
     SetAutostart(bool),
+    SetLatency(u32),
     Refresh,
     Quit,
 }
@@ -64,6 +67,9 @@ struct Shared {
     play_wanted: AtomicBool,
     sunshine_aware: AtomicBool,
     autostart: AtomicBool,
+    latency_frames: Mutex<u32>,
+    api: Arc<crate::api::ApiState>,
+    api_port: u16,
     running: AtomicBool,
     tooltip: Mutex<String>,
 }
@@ -80,6 +86,12 @@ pub fn run() -> Result<()> {
         play_wanted: AtomicBool::new(cfg.play),
         sunshine_aware: AtomicBool::new(cfg.sunshine_aware),
         autostart: AtomicBool::new(cfg.autostart),
+        latency_frames: Mutex::new(cfg.latency_frames),
+        api: Arc::new(crate::api::ApiState::new(
+            cfg.capture_device.clone(),
+            cfg.latency_frames,
+        )),
+        api_port: cfg.api_port,
         running: AtomicBool::new(false),
         tooltip: Mutex::new("airplay: idle".into()),
     });
@@ -92,6 +104,7 @@ pub fn run() -> Result<()> {
     let cmd_quit = cmd_tx.clone();
     let rt = tokio::runtime::Runtime::new()?;
     let handle = rt.handle().clone();
+    crate::api::spawn(shared.api.clone(), cfg.api_port, &handle);
     let shared_rt = shared.clone();
     let join = std::thread::Builder::new()
         .name("airplay-tokio".into())
@@ -187,6 +200,7 @@ async fn worker(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                     }
                     Cmd::SelectCapture(name) => {
                         *shared.capture.lock().unwrap() = name.clone();
+                        shared.api.set_capture_hint(name.clone());
                         save_cfg(&shared);
                         info!(name, "selected capture");
                     }
@@ -212,6 +226,18 @@ async fn worker(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                             warn!("autostart: {e}");
                         } else {
                             info!(on, "Start with Windows");
+                        }
+                    }
+                    Cmd::SetLatency(frames) => {
+                        let prev = *shared.latency_frames.lock().unwrap();
+                        *shared.latency_frames.lock().unwrap() = frames;
+                        shared.api.set_lead_frames(frames);
+                        save_cfg(&shared);
+                        info!(frames, label = %latency_preset_label(frames), "latency preset");
+                        let playing = slot.lock().unwrap().is_some() || session_task.is_some();
+                        if playing && frames != prev && !hang {
+                            stop_session(&shared, &slot, &mut session_task).await;
+                            begin_session(&shared, &slot, &reconnect, &mut session_task).await;
                         }
                     }
                     Cmd::Start => {
@@ -299,14 +325,19 @@ async fn begin_session(
             let sh = sh.clone();
             Arc::new(move |s: &str| {
                 info!("{s}");
+                sh.api.set_streaming(s == "[STATUS] streaming");
                 let line = s.trim_start_matches("[STATUS] ").to_string();
                 *sh.tooltip.lock().unwrap() = format!("airplay: {line}");
             }) as Arc<dyn Fn(&str) + Send + Sync>
         };
         status("[STATUS] connecting");
-        if let Err(e) = run::run_supervised(target, hint, stop_rx, vol_rx, rec, status).await {
+        let latency_frames = *sh.latency_frames.lock().unwrap();
+        if let Err(e) =
+            run::run_supervised(target, hint, stop_rx, vol_rx, rec, status, latency_frames).await
+        {
             error!("supervised session: {e}");
         }
+        sh.api.set_streaming(false);
         *slot_t.lock().unwrap() = None;
         sh.running.store(false, Ordering::SeqCst);
         if sh.tooltip.lock().unwrap().starts_with("airplay: waiting") {
@@ -343,6 +374,8 @@ fn save_cfg(shared: &Shared) {
         play: shared.play_wanted.load(Ordering::SeqCst),
         sunshine_aware: shared.sunshine_aware.load(Ordering::SeqCst),
         autostart: shared.autostart.load(Ordering::SeqCst),
+        latency_frames: *shared.latency_frames.lock().unwrap(),
+        api_port: shared.api_port,
     };
     if let Err(e) = cfg.save() {
         warn!("save config: {e}");
@@ -527,6 +560,24 @@ unsafe fn show_menu(hwnd: HWND, shared: &Shared, _cmd_tx: &mpsc::UnboundedSender
     let vol_l: Vec<u16> = encode("HomePod volume");
     let _ = AppendMenuW(menu, MF_POPUP, vol_menu.0 as usize, PCWSTR(vol_l.as_ptr()));
 
+    let lat_menu = CreatePopupMenu().unwrap();
+    let cur_lat = *shared.latency_frames.lock().unwrap();
+    for (i, frames) in LATENCY_PRESETS.iter().enumerate() {
+        let enc: Vec<u16> = encode(&latency_preset_label(*frames));
+        let mut flags = MF_STRING;
+        if *frames == cur_lat {
+            flags |= MF_CHECKED;
+        }
+        let _ = AppendMenuW(
+            lat_menu,
+            flags,
+            (ID_LAT_BASE as usize) + i,
+            PCWSTR(enc.as_ptr()),
+        );
+    }
+    let lat_l: Vec<u16> = encode("Latency");
+    let _ = AppendMenuW(menu, MF_POPUP, lat_menu.0 as usize, PCWSTR(lat_l.as_ptr()));
+
     let ref_s: Vec<u16> = encode("Refresh devices");
     let quit: Vec<u16> = encode("Quit");
     let _ = AppendMenuW(menu, MF_STRING, ID_REFRESH as usize, PCWSTR(ref_s.as_ptr()));
@@ -582,6 +633,12 @@ fn handle_command(id: u16, shared: &Shared, cmd_tx: &mpsc::UnboundedSender<Cmd>)
             let i = (id - ID_CAP_BASE) as usize;
             if let Some((name, _)) = shared.captures.lock().unwrap().get(i).cloned() {
                 let _ = cmd_tx.send(Cmd::SelectCapture(name));
+            }
+        }
+        id if (ID_LAT_BASE..ID_LAT_BASE + LATENCY_PRESETS.len() as u16).contains(&id) => {
+            let i = (id - ID_LAT_BASE) as usize;
+            if let Some(frames) = LATENCY_PRESETS.get(i).copied() {
+                let _ = cmd_tx.send(Cmd::SetLatency(frames));
             }
         }
         _ => {}

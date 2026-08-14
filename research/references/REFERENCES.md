@@ -47,6 +47,7 @@
 | 仓库 | URL | Commit SHA | 定位 |
 |---|---|---|---|
 | airplay2-sender-cpp | github.com/akustikrausch/airplay2-sender-cpp | 8c4034263f1c265d25b3cfb88a090624760ad22a | Akustikrausch（FXChainPlayer 产品作者）C++ AP2 发送端；README 的"已验证"声明不予采信，**仅其代码字面行为可作消息格式参照**，且与 A 级冲突时以 A 级为准 |
+| chrome-audio-delay | github.com/gurux13/chrome-audio-delay | aeb4c6e4294773d0273ba88468f725f7e0f7fb0a | 向 Chromium 音频进程注入 DLL，改 `IAudioClock::GetPosition` 以推迟画面；README 声称测过 Chrome/Edge。**不是 AirPlay 参考**，仅作音画对齐旁证；散文不采信，只看代码字面 |
 
 ## 二、保存的网页 / 文档（本目录，未入版本控制）
 

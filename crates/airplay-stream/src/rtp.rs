@@ -13,8 +13,34 @@ use chacha20poly1305::{
 
 pub const SAMPLE_RATE: u32 = 44100;
 pub const FRAMES_PER_PACKET: usize = 352;
+/// Safe default lead (1.5 s). Also the last tray preset.
 pub const LATENCY_FRAMES: u32 = 22050 + SAMPLE_RATE;
+/// Tray / config presets: 120/180/240/300/360 ms, then the 1.5 s default.
+pub const LATENCY_PRESETS: [u32; 6] = [5292, 7938, 10584, 13230, 15876, LATENCY_FRAMES];
 pub const BACKLOG: usize = 512;
+
+/// SETUP window for a lead. 66150 keeps 11025/88200; every other preset is min 0, max = lead * 2.
+pub fn latency_window(lead: u32) -> (u32, u32) {
+    if lead == LATENCY_FRAMES {
+        (11025, 88200)
+    } else {
+        (0, lead.saturating_mul(2))
+    }
+}
+
+/// Snap a persisted or typed value onto the nearest preset.
+pub fn nearest_latency_preset(lead: u32) -> u32 {
+    LATENCY_PRESETS
+        .into_iter()
+        .min_by_key(|p| p.abs_diff(lead))
+        .unwrap_or(LATENCY_FRAMES)
+}
+
+/// Tray / log label, e.g. `120 ms (5292 frames)`.
+pub fn latency_preset_label(lead: u32) -> String {
+    let ms = u64::from(lead) * 10 / 441;
+    format!("{ms} ms ({lead} frames)")
+}
 
 pub fn rtp_header(first: bool, seq: u16, rtptime: u32, ssrc: u32) -> [u8; 12] {
     let mut h = [0u8; 12];
@@ -49,12 +75,12 @@ pub fn encrypt_audio(shk: &[u8; 32], header: &[u8; 12], pcm: &[i16], seq: u16) -
     Ok(out)
 }
 
-pub fn sync_packet(first: bool, rtptime: u32, head_ts: u64) -> [u8; 20] {
+pub fn sync_packet(first: bool, rtptime: u32, head_ts: u64, lead: u32) -> [u8; 20] {
     let mut p = [0u8; 20];
     p[0] = if first { 0x90 } else { 0x80 };
     p[1] = 0xD4;
     p[2..4].copy_from_slice(&0x0007u16.to_be_bytes());
-    let pos = rtptime.wrapping_sub(LATENCY_FRAMES);
+    let pos = rtptime.wrapping_sub(lead);
     p[4..8].copy_from_slice(&pos.to_be_bytes());
     let (sec, frac) = ntp_parts(ts2ntp(head_ts, SAMPLE_RATE));
     p[8..12].copy_from_slice(&sec.to_be_bytes());

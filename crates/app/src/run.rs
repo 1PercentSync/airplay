@@ -10,8 +10,8 @@ use airplay_rtsp::{
     PlistInt, RtspClient, Value,
 };
 use airplay_stream::{
-    encrypt_audio, ntp2ts, ntp_now, retransmit_wrap, rtp_header, sync_packet, timing_reply,
-    Backlog, FRAMES_PER_PACKET, LATENCY_FRAMES, SAMPLE_RATE,
+    encrypt_audio, latency_preset_label, latency_window, ntp2ts, ntp_now, retransmit_wrap,
+    rtp_header, sync_packet, timing_reply, Backlog, FRAMES_PER_PACKET, SAMPLE_RATE,
 };
 use anyhow::{Context, Result};
 use audio_pipe::{spawn_processor, Capture, PacketQueue, SampleRing};
@@ -67,13 +67,28 @@ pub async fn run(target: &str, device_hint: Option<&str>) -> Result<()> {
         let _ = tokio::signal::ctrl_c().await;
         ctrl.request_stop();
     });
+    let cfg = crate::config::Config::load();
+    let latency_frames = cfg.latency_frames;
+    let api = Arc::new(crate::api::ApiState::new(
+        device_hint.unwrap_or("").to_string(),
+        latency_frames,
+    ));
+    crate::api::spawn(api.clone(), cfg.api_port, &tokio::runtime::Handle::current());
+    let status = {
+        let api = api.clone();
+        Arc::new(move |s: &str| {
+            println!("{s}");
+            api.set_streaming(s == "[STATUS] streaming");
+        }) as Arc<dyn Fn(&str) + Send + Sync>
+    };
     run_supervised(
         target.to_string(),
         device_hint.map(str::to_string),
         stop_rx,
         vol_rx,
         Arc::new(AtomicU64::new(0)),
-        Arc::new(|s: &str| println!("{s}")),
+        status,
+        latency_frames,
     )
     .await
 }
@@ -88,6 +103,7 @@ pub async fn run_supervised(
     vol_rx: watch::Receiver<f64>,
     reconnect: Arc<AtomicU64>,
     status: Arc<dyn Fn(&str) + Send + Sync>,
+    latency_frames: u32,
 ) -> Result<()> {
     #[cfg(windows)]
     let mix = Arc::new(StdMutex::new(None));
@@ -149,6 +165,7 @@ pub async fn run_supervised(
             status.clone(),
             packets.clone(),
             capture.ring(),
+            latency_frames,
         )
         .await
         {
@@ -198,6 +215,7 @@ pub async fn run_session(
     status: Arc<dyn Fn(&str) + Send + Sync>,
     packets: Arc<PacketQueue>,
     cap_ring: Arc<SampleRing>,
+    latency_frames: u32,
 ) -> Result<()> {
     status("[STATUS] probing");
     let addr = parse_host_port(target, AIRPLAY_PORT).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -294,7 +312,16 @@ pub async fn run_session(
         None
     };
 
-    let stream_body = stream_setup_plist(local_control, &shk, session_id)?;
+    let (latency_min, latency_max) = latency_window(latency_frames);
+    info!(
+        lead = latency_frames,
+        preset = %latency_preset_label(latency_frames),
+        latency_min,
+        latency_max,
+        "stream latency"
+    );
+    let stream_body =
+        stream_setup_plist(local_control, &shk, session_id, latency_min, latency_max)?;
     log_plist("stream SETUP request", &stream_body);
     let extra = session_extra(&session_hdr);
     let extra_ref: Vec<(&str, &str)> = extra
@@ -461,6 +488,7 @@ pub async fn run_session(
         packets,
         backlog,
         rtp_sent,
+        latency_frames,
     );
     let user_stop = tokio::select! {
         _ = async {
@@ -536,6 +564,7 @@ async fn send_pump(
     packets: Arc<PacketQueue>,
     backlog: Arc<StdMutex<Backlog>>,
     rtp_sent: Arc<AtomicU64>,
+    lead: u32,
 ) -> Result<()> {
     // pyatv stream_client.py: monotonic clock vs frames sent; catch-up capped.
     // Architecture §7: ≤8 packets per tick. Do not use tokio interval + Skip:
@@ -568,6 +597,7 @@ async fn send_pump(
             &mut first_sync,
             &mut last_sync,
             &silence,
+            lead,
         )
         .await?;
 
@@ -592,6 +622,7 @@ async fn send_pump(
                 &mut first_sync,
                 &mut last_sync,
                 &silence,
+                lead,
             )
             .await?;
             extra += 1;
@@ -621,12 +652,13 @@ async fn send_one(
     first_sync: &mut bool,
     last_sync: &mut Instant,
     silence: &[i16],
+    lead: u32,
 ) -> Result<()> {
     let pcm = match packets.pop() {
         Some(p) if p.len() == FRAMES_PER_PACKET * 2 => p,
         _ => silence.to_vec(),
     };
-    let rtptime = LATENCY_FRAMES.wrapping_add(*frames_sent as u32);
+    let rtptime = lead.wrapping_add(*frames_sent as u32);
     let header = rtp_header(*first_audio, *seq, rtptime, ssrc);
     let pkt = encrypt_audio(shk, &header, &pcm, *seq).map_err(|e| anyhow::anyhow!("{e}"))?;
     audio.send_to(&pkt, data_addr).await?;
@@ -644,7 +676,7 @@ async fn send_one(
 
     if *first_sync || last_sync.elapsed() >= Duration::from_secs(1) {
         let head_ts = start_ts + *frames_sent;
-        let sync = sync_packet(*first_sync, rtptime, head_ts);
+        let sync = sync_packet(*first_sync, rtptime, head_ts, lead);
         control.send_to(&sync, ctl_addr).await?;
         *first_sync = false;
         *last_sync = Instant::now();
@@ -755,15 +787,21 @@ fn session_setup_plist(device_id: &str, uuid: &str, timing_port: u16) -> Result<
     plist_encode(&dict).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-fn stream_setup_plist(control_port: u16, shk: &[u8; 32], session_id: u32) -> Result<Vec<u8>> {
+fn stream_setup_plist(
+    control_port: u16,
+    shk: &[u8; 32],
+    session_id: u32,
+    latency_min: u32,
+    latency_max: u32,
+) -> Result<Vec<u8>> {
     let stream = Value::Dict(vec![
         ("audioFormat".into(), v_int(0x40000)),
         ("audioMode".into(), Value::String("default".into())),
         ("controlPort".into(), v_int(i64::from(control_port))),
         ("ct".into(), v_int(2)),
         ("isMedia".into(), Value::Bool(true)),
-        ("latencyMax".into(), v_int(88200)),
-        ("latencyMin".into(), v_int(11025)),
+        ("latencyMax".into(), v_int(i64::from(latency_max))),
+        ("latencyMin".into(), v_int(i64::from(latency_min))),
         ("shk".into(), Value::Data(shk.to_vec())),
         ("spf".into(), v_int(FRAMES_PER_PACKET as i64)),
         ("sr".into(), v_int(i64::from(SAMPLE_RATE))),
