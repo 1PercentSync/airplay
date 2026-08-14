@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font: 13px/1.5 system-ui, sans-serif;
+        min-width: 240px;
+        padding: 10px 12px;
+        margin: 0;
+      }
+      .row {
+        margin: 8px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .val {
+        font-weight: 600;
+      }
+      input[type='number'] {
+        width: 72px;
+      }
+      .hint {
+        color: #888;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="row"><span>API</span><span class="val" id="api">…</span></div>
+    <div class="row"><span>Delay active</span><span class="val" id="active">…</span></div>
+    <div class="row"><span>AirPlay lead</span><span class="val" id="lead">-</span></div>
+    <div class="row">
+      <span>Extra offset (ms)</span>
+      <span><input id="off" type="number" step="10" value="0" /> <button id="save">Save</button></span>
+    </div>
+    <div class="row"><span>Effective video delay</span><span class="val" id="eff">0 ms</span></div>
+    <div class="hint">Video is delayed by lead + offset while streaming. Positive offset = video later.</div>
+    <script src="popup.js"></script>
+  </body>
+</html>
