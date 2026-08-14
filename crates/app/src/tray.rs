@@ -4,6 +4,7 @@
 
 #![cfg(windows)]
 
+use crate::autostart;
 use crate::config::Config;
 use crate::probe::{self, Discovered};
 use crate::run::{self, SessionCtrl};
@@ -36,6 +37,7 @@ const ID_STOP: u16 = 1002;
 const ID_REFRESH: u16 = 1003;
 const ID_QUIT: u16 = 1004;
 const ID_SUNSHINE: u16 = 1005;
+const ID_AUTOSTART: u16 = 1006;
 const ID_VOL_BASE: u16 = 1100;
 const ID_DEV_BASE: u16 = 1200;
 const ID_CAP_BASE: u16 = 1300;
@@ -47,6 +49,7 @@ enum Cmd {
     SelectTarget { target: String, name: String },
     SelectCapture(String),
     SetSunshineAware(bool),
+    SetAutostart(bool),
     Refresh,
     Quit,
 }
@@ -60,6 +63,7 @@ struct Shared {
     volume: Mutex<f64>,
     play_wanted: AtomicBool,
     sunshine_aware: AtomicBool,
+    autostart: AtomicBool,
     running: AtomicBool,
     tooltip: Mutex<String>,
 }
@@ -75,10 +79,14 @@ pub fn run() -> Result<()> {
         volume: Mutex::new(cfg.volume.clamp(0.0, 1.0)),
         play_wanted: AtomicBool::new(cfg.play),
         sunshine_aware: AtomicBool::new(cfg.sunshine_aware),
+        autostart: AtomicBool::new(cfg.autostart),
         running: AtomicBool::new(false),
         tooltip: Mutex::new("airplay: idle".into()),
     });
     refresh_captures(&shared);
+    if let Err(e) = autostart::apply(cfg.autostart) {
+        warn!("apply autostart: {e}");
+    }
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let cmd_quit = cmd_tx.clone();
@@ -196,6 +204,15 @@ async fn worker(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                         }
                         save_cfg(&shared);
                         info!(on, "Sunshine aware");
+                    }
+                    Cmd::SetAutostart(on) => {
+                        shared.autostart.store(on, Ordering::SeqCst);
+                        save_cfg(&shared);
+                        if let Err(e) = autostart::apply(on) {
+                            warn!("autostart: {e}");
+                        } else {
+                            info!(on, "Start with Windows");
+                        }
                     }
                     Cmd::Start => {
                         shared.play_wanted.store(true, Ordering::SeqCst);
@@ -325,6 +342,7 @@ fn save_cfg(shared: &Shared) {
         volume: *shared.volume.lock().unwrap(),
         play: shared.play_wanted.load(Ordering::SeqCst),
         sunshine_aware: shared.sunshine_aware.load(Ordering::SeqCst),
+        autostart: shared.autostart.load(Ordering::SeqCst),
     };
     if let Err(e) = cfg.save() {
         warn!("save config: {e}");
@@ -453,6 +471,13 @@ unsafe fn show_menu(hwnd: HWND, shared: &Shared, _cmd_tx: &mpsc::UnboundedSender
     }
     let _ = AppendMenuW(menu, sun_flags, ID_SUNSHINE as usize, PCWSTR(sun.as_ptr()));
 
+    let boot: Vec<u16> = encode("Start with Windows");
+    let mut boot_flags = MF_STRING;
+    if shared.autostart.load(Ordering::SeqCst) {
+        boot_flags |= MF_CHECKED;
+    }
+    let _ = AppendMenuW(menu, boot_flags, ID_AUTOSTART as usize, PCWSTR(boot.as_ptr()));
+
     let homepod = CreatePopupMenu().unwrap();
     let devices = shared.devices.lock().unwrap().clone();
     let cur = shared.target.lock().unwrap().clone();
@@ -526,6 +551,10 @@ fn handle_command(id: u16, shared: &Shared, cmd_tx: &mpsc::UnboundedSender<Cmd>)
         ID_SUNSHINE => {
             let on = !shared.sunshine_aware.load(Ordering::SeqCst);
             let _ = cmd_tx.send(Cmd::SetSunshineAware(on));
+        }
+        ID_AUTOSTART => {
+            let on = !shared.autostart.load(Ordering::SeqCst);
+            let _ = cmd_tx.send(Cmd::SetAutostart(on));
         }
         ID_REFRESH => {
             let _ = cmd_tx.send(Cmd::Refresh);

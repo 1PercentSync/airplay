@@ -2,6 +2,8 @@
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod autostart;
 mod config;
 mod probe;
 mod run;

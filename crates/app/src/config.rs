@@ -14,6 +14,7 @@ pub struct Config {
     pub volume: f64,
     pub play: bool,
     pub sunshine_aware: bool,
+    pub autostart: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -42,6 +43,8 @@ struct FileCfg {
     play: bool,
     #[serde(default = "default_sunshine_aware")]
     sunshine_aware: bool,
+    #[serde(default)]
+    autostart: bool,
 }
 
 fn default_volume() -> f64 {
@@ -61,6 +64,7 @@ impl Default for Config {
             volume: 0.5,
             play: false,
             sunshine_aware: true,
+            autostart: false,
         }
     }
 }
@@ -84,6 +88,7 @@ impl Config {
                     volume: f.volume.clamp(0.0, 1.0),
                     play: f.play,
                     sunshine_aware: f.sunshine_aware,
+                    autostart: f.autostart,
                 },
                 Err(_) => Self::default(),
             },
@@ -104,6 +109,7 @@ impl Config {
             volume: self.volume.clamp(0.0, 1.0),
             play: self.play,
             sunshine_aware: self.sunshine_aware,
+            autostart: self.autostart,
         };
         std::fs::write(path, toml::to_string_pretty(&file)?)?;
         Ok(())
