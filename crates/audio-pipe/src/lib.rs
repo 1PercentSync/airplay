@@ -2,10 +2,14 @@
 
 mod capture;
 mod enum_devices;
+#[cfg(windows)]
+mod policy_format;
 mod process;
 mod ring;
 
 pub use capture::Capture;
-pub use enum_devices::{list_render_devices, RenderDevice};
+pub use enum_devices::{list_render_devices, pick_render_device_id, RenderDevice};
+#[cfg(windows)]
+pub use policy_format::FormatGuard;
 pub use process::spawn_processor;
 pub use ring::{PacketQueue, SampleRing};

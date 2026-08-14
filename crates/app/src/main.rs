@@ -5,6 +5,7 @@
 mod config;
 mod probe;
 mod run;
+mod sunshine;
 #[cfg(windows)]
 mod tray;
 

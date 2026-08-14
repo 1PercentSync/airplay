@@ -12,6 +12,8 @@ pub struct Config {
     pub device_name: String,
     pub capture_device: String,
     pub volume: f64,
+    pub play: bool,
+    pub sunshine_aware: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -36,10 +38,18 @@ struct FileCfg {
     capture: CaptureFile,
     #[serde(default = "default_volume")]
     volume: f64,
+    #[serde(default)]
+    play: bool,
+    #[serde(default = "default_sunshine_aware")]
+    sunshine_aware: bool,
 }
 
 fn default_volume() -> f64 {
     0.5
+}
+
+fn default_sunshine_aware() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -49,6 +59,8 @@ impl Default for Config {
             device_name: String::new(),
             capture_device: String::new(),
             volume: 0.5,
+            play: false,
+            sunshine_aware: true,
         }
     }
 }
@@ -70,6 +82,8 @@ impl Config {
                     device_name: f.device.name,
                     capture_device: f.capture.device_name,
                     volume: f.volume.clamp(0.0, 1.0),
+                    play: f.play,
+                    sunshine_aware: f.sunshine_aware,
                 },
                 Err(_) => Self::default(),
             },
@@ -88,6 +102,8 @@ impl Config {
                 device_name: self.capture_device.clone(),
             },
             volume: self.volume.clamp(0.0, 1.0),
+            play: self.play,
+            sunshine_aware: self.sunshine_aware,
         };
         std::fs::write(path, toml::to_string_pretty(&file)?)?;
         Ok(())

@@ -7,6 +7,7 @@
 use crate::config::Config;
 use crate::probe::{self, Discovered};
 use crate::run::{self, SessionCtrl};
+use crate::sunshine;
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,6 +35,7 @@ const ID_START: u16 = 1001;
 const ID_STOP: u16 = 1002;
 const ID_REFRESH: u16 = 1003;
 const ID_QUIT: u16 = 1004;
+const ID_SUNSHINE: u16 = 1005;
 const ID_VOL_BASE: u16 = 1100;
 const ID_DEV_BASE: u16 = 1200;
 const ID_CAP_BASE: u16 = 1300;
@@ -44,6 +46,7 @@ enum Cmd {
     SetVolume(f64),
     SelectTarget { target: String, name: String },
     SelectCapture(String),
+    SetSunshineAware(bool),
     Refresh,
     Quit,
 }
@@ -55,6 +58,8 @@ struct Shared {
     device_name: Mutex<String>,
     capture: Mutex<String>,
     volume: Mutex<f64>,
+    play_wanted: AtomicBool,
+    sunshine_aware: AtomicBool,
     running: AtomicBool,
     tooltip: Mutex<String>,
 }
@@ -68,6 +73,8 @@ pub fn run() -> Result<()> {
         device_name: Mutex::new(cfg.device_name.clone()),
         capture: Mutex::new(cfg.capture_device.clone()),
         volume: Mutex::new(cfg.volume.clamp(0.0, 1.0)),
+        play_wanted: AtomicBool::new(cfg.play),
+        sunshine_aware: AtomicBool::new(cfg.sunshine_aware),
         running: AtomicBool::new(false),
         tooltip: Mutex::new("airplay: idle".into()),
     });
@@ -114,112 +121,200 @@ fn refresh_captures(shared: &Shared) {
 async fn worker(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
     let slot: Arc<Mutex<Option<SessionCtrl>>> = Arc::new(Mutex::new(None));
     let reconnect = Arc::new(AtomicU64::new(0));
+    let mut session_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut hang = false;
+    let mut sun_on = sunshine::app_connected().await;
+    let mut booted = false;
+    let mut tick = tokio::time::interval(Duration::from_secs(15));
     loop {
-        let Some(cmd) = cmd_rx.recv().await else {
-            break;
-        };
-        match cmd {
-            Cmd::Refresh => {
-                refresh_captures(&shared);
-                match probe::browse().await {
-                    Ok(list) => {
-                        let want_name = shared.device_name.lock().unwrap().clone();
-                        if shared.target.lock().unwrap().is_empty() {
-                            let pick = list
-                                .iter()
-                                .find(|d| !want_name.is_empty() && d.display_name() == want_name)
-                                .or_else(|| list.first());
-                            if let Some(d) = pick {
-                                if let Some(t) = d.target() {
-                                    *shared.target.lock().unwrap() = t;
-                                    *shared.device_name.lock().unwrap() = d.display_name();
-                                    save_cfg(&shared);
+        tokio::select! {
+            cmd = cmd_rx.recv() => {
+                let Some(cmd) = cmd else {
+                    break;
+                };
+                match cmd {
+                    Cmd::Refresh => {
+                        refresh_captures(&shared);
+                        match probe::browse().await {
+                            Ok(list) => {
+                                let want_name = shared.device_name.lock().unwrap().clone();
+                                if shared.target.lock().unwrap().is_empty() {
+                                    let pick = list
+                                        .iter()
+                                        .find(|d| !want_name.is_empty() && d.display_name() == want_name)
+                                        .or_else(|| list.first());
+                                    if let Some(d) = pick {
+                                        if let Some(t) = d.target() {
+                                            *shared.target.lock().unwrap() = t;
+                                            *shared.device_name.lock().unwrap() = d.display_name();
+                                            save_cfg(&shared);
+                                        }
+                                    }
+                                }
+                                *shared.devices.lock().unwrap() = list;
+                            }
+                            Err(e) => warn!("browse: {e}"),
+                        }
+                        if !booted {
+                            booted = true;
+                            sun_on = sunshine::app_connected().await;
+                            if shared.play_wanted.load(Ordering::SeqCst) {
+                                let aware = shared.sunshine_aware.load(Ordering::SeqCst);
+                                if aware && sun_on {
+                                    hang = true;
+                                    *shared.tooltip.lock().unwrap() =
+                                        "airplay: waiting (Sunshine)".into();
+                                    info!("play remembered on; Sunshine already connected, deferring");
+                                } else {
+                                    begin_session(&shared, &slot, &reconnect, &mut session_task).await;
                                 }
                             }
                         }
-                        *shared.devices.lock().unwrap() = list;
                     }
-                    Err(e) => warn!("browse: {e}"),
+                    Cmd::SelectTarget { target, name } => {
+                        *shared.target.lock().unwrap() = target.clone();
+                        *shared.device_name.lock().unwrap() = name;
+                        save_cfg(&shared);
+                        info!(target = %target, "selected HomePod");
+                    }
+                    Cmd::SelectCapture(name) => {
+                        *shared.capture.lock().unwrap() = name.clone();
+                        save_cfg(&shared);
+                        info!(name, "selected capture");
+                    }
+                    Cmd::SetVolume(v) => {
+                        *shared.volume.lock().unwrap() = v;
+                        save_cfg(&shared);
+                        if let Some(s) = slot.lock().unwrap().as_ref() {
+                            s.set_volume(v);
+                        }
+                    }
+                    Cmd::SetSunshineAware(on) => {
+                        shared.sunshine_aware.store(on, Ordering::SeqCst);
+                        if !on {
+                            hang = false;
+                        }
+                        save_cfg(&shared);
+                        info!(on, "Sunshine aware");
+                    }
+                    Cmd::Start => {
+                        shared.play_wanted.store(true, Ordering::SeqCst);
+                        hang = false;
+                        save_cfg(&shared);
+                        begin_session(&shared, &slot, &reconnect, &mut session_task).await;
+                    }
+                    Cmd::Stop => {
+                        shared.play_wanted.store(false, Ordering::SeqCst);
+                        hang = false;
+                        save_cfg(&shared);
+                        stop_session(&shared, &slot, &mut session_task).await;
+                    }
+                    Cmd::Quit => {
+                        stop_session(&shared, &slot, &mut session_task).await;
+                        break;
+                    }
                 }
             }
-            Cmd::SelectTarget { target, name } => {
-                *shared.target.lock().unwrap() = target.clone();
-                *shared.device_name.lock().unwrap() = name;
-                save_cfg(&shared);
-                info!(target = %target, "selected HomePod");
-            }
-            Cmd::SelectCapture(name) => {
-                *shared.capture.lock().unwrap() = name.clone();
-                save_cfg(&shared);
-                info!(name, "selected capture");
-            }
-            Cmd::SetVolume(v) => {
-                *shared.volume.lock().unwrap() = v;
-                save_cfg(&shared);
-                if let Some(s) = slot.lock().unwrap().as_ref() {
-                    s.set_volume(v);
-                }
-            }
-            Cmd::Start => {
-                if slot.lock().unwrap().is_some() {
+            _ = tick.tick() => {
+                let now = sunshine::app_connected().await;
+                if now == sun_on {
                     continue;
                 }
-                let target = shared.target.lock().unwrap().clone();
-                if target.is_empty() {
-                    warn!("no HomePod selected");
-                    *shared.tooltip.lock().unwrap() = "airplay: no device".into();
+                let was = sun_on;
+                sun_on = now;
+                if !shared.sunshine_aware.load(Ordering::SeqCst) {
                     continue;
                 }
-                let capture = shared.capture.lock().unwrap().clone();
-                let hint = if capture.is_empty() {
-                    None
-                } else {
-                    Some(capture)
-                };
-                let vol = *shared.volume.lock().unwrap();
-                let (ctrl, stop_rx, vol_rx) = SessionCtrl::new(vol);
-                *slot.lock().unwrap() = Some(ctrl);
-                shared.running.store(true, Ordering::SeqCst);
-                *shared.tooltip.lock().unwrap() = format!("airplay: connecting {target}");
-                let sh = shared.clone();
-                let rec = reconnect.clone();
-                let slot_t = slot.clone();
-                tokio::spawn(async move {
-                    let status = {
-                        let sh = sh.clone();
-                        Arc::new(move |s: &str| {
-                            info!("{s}");
-                            let line = s.trim_start_matches("[STATUS] ").to_string();
-                            *sh.tooltip.lock().unwrap() = format!("airplay: {line}");
-                        }) as Arc<dyn Fn(&str) + Send + Sync>
-                    };
-                    status("[STATUS] connecting");
-                    if let Err(e) =
-                        run::run_supervised(target, hint, stop_rx, vol_rx, rec, status).await
-                    {
-                        error!("supervised session: {e}");
-                    }
-                    *slot_t.lock().unwrap() = None;
-                    sh.running.store(false, Ordering::SeqCst);
-                    *sh.tooltip.lock().unwrap() = "airplay: idle".into();
-                });
-            }
-            Cmd::Stop => {
-                if let Some(s) = slot.lock().unwrap().take() {
-                    s.request_stop();
+                let playing = slot.lock().unwrap().is_some();
+                if !was && now && playing {
+                    info!("Sunshine connected, pausing HomePod once");
+                    hang = true;
+                    stop_session(&shared, &slot, &mut session_task).await;
+                    *shared.tooltip.lock().unwrap() = "airplay: waiting (Sunshine)".into();
+                } else if was && !now && hang {
+                    info!("Sunshine disconnected, resuming HomePod");
+                    hang = false;
+                    begin_session(&shared, &slot, &reconnect, &mut session_task).await;
                 }
-                shared.running.store(false, Ordering::SeqCst);
-                *shared.tooltip.lock().unwrap() = "airplay: idle".into();
-            }
-            Cmd::Quit => {
-                if let Some(s) = slot.lock().unwrap().take() {
-                    s.request_stop();
-                }
-                tokio::time::sleep(Duration::from_millis(400)).await;
-                break;
             }
         }
     }
+}
+
+async fn begin_session(
+    shared: &Arc<Shared>,
+    slot: &Arc<Mutex<Option<SessionCtrl>>>,
+    reconnect: &Arc<AtomicU64>,
+    session_task: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    if let Some(h) = session_task.take() {
+        if !h.is_finished() {
+            *session_task = Some(h);
+            return;
+        }
+        let _ = h.await;
+    }
+    if slot.lock().unwrap().is_some() {
+        return;
+    }
+    let target = shared.target.lock().unwrap().clone();
+    if target.is_empty() {
+        warn!("no HomePod selected");
+        *shared.tooltip.lock().unwrap() = "airplay: no device".into();
+        return;
+    }
+    let capture = shared.capture.lock().unwrap().clone();
+    let hint = if capture.is_empty() {
+        None
+    } else {
+        Some(capture)
+    };
+    let vol = *shared.volume.lock().unwrap();
+    let (ctrl, stop_rx, vol_rx) = SessionCtrl::new(vol);
+    *slot.lock().unwrap() = Some(ctrl);
+    shared.running.store(true, Ordering::SeqCst);
+    *shared.tooltip.lock().unwrap() = format!("airplay: connecting {target}");
+    let sh = shared.clone();
+    let rec = reconnect.clone();
+    let slot_t = slot.clone();
+    *session_task = Some(tokio::spawn(async move {
+        let status = {
+            let sh = sh.clone();
+            Arc::new(move |s: &str| {
+                info!("{s}");
+                let line = s.trim_start_matches("[STATUS] ").to_string();
+                *sh.tooltip.lock().unwrap() = format!("airplay: {line}");
+            }) as Arc<dyn Fn(&str) + Send + Sync>
+        };
+        status("[STATUS] connecting");
+        if let Err(e) = run::run_supervised(target, hint, stop_rx, vol_rx, rec, status).await {
+            error!("supervised session: {e}");
+        }
+        *slot_t.lock().unwrap() = None;
+        sh.running.store(false, Ordering::SeqCst);
+        if sh.tooltip.lock().unwrap().starts_with("airplay: waiting") {
+            return;
+        }
+        *sh.tooltip.lock().unwrap() = "airplay: idle".into();
+    }));
+}
+
+async fn stop_session(
+    shared: &Shared,
+    slot: &Arc<Mutex<Option<SessionCtrl>>>,
+    session_task: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    if let Some(s) = slot.lock().unwrap().take() {
+        s.request_stop();
+    }
+    shared.running.store(false, Ordering::SeqCst);
+    if let Some(h) = session_task.take() {
+        let _ = h.await;
+    }
+    if shared.tooltip.lock().unwrap().starts_with("airplay: waiting") {
+        return;
+    }
+    *shared.tooltip.lock().unwrap() = "airplay: idle".into();
 }
 
 fn save_cfg(shared: &Shared) {
@@ -228,6 +323,8 @@ fn save_cfg(shared: &Shared) {
         device_name: shared.device_name.lock().unwrap().clone(),
         capture_device: shared.capture.lock().unwrap().clone(),
         volume: *shared.volume.lock().unwrap(),
+        play: shared.play_wanted.load(Ordering::SeqCst),
+        sunshine_aware: shared.sunshine_aware.load(Ordering::SeqCst),
     };
     if let Err(e) = cfg.save() {
         warn!("save config: {e}");
@@ -349,6 +446,13 @@ unsafe fn show_menu(hwnd: HWND, shared: &Shared, _cmd_tx: &mpsc::UnboundedSender
         let _ = AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_STOP as usize, PCWSTR(stop.as_ptr()));
     }
 
+    let sun: Vec<u16> = encode("Sunshine aware");
+    let mut sun_flags = MF_STRING;
+    if shared.sunshine_aware.load(Ordering::SeqCst) {
+        sun_flags |= MF_CHECKED;
+    }
+    let _ = AppendMenuW(menu, sun_flags, ID_SUNSHINE as usize, PCWSTR(sun.as_ptr()));
+
     let homepod = CreatePopupMenu().unwrap();
     let devices = shared.devices.lock().unwrap().clone();
     let cur = shared.target.lock().unwrap().clone();
@@ -418,6 +522,10 @@ fn handle_command(id: u16, shared: &Shared, cmd_tx: &mpsc::UnboundedSender<Cmd>)
         }
         ID_STOP => {
             let _ = cmd_tx.send(Cmd::Stop);
+        }
+        ID_SUNSHINE => {
+            let on = !shared.sunshine_aware.load(Ordering::SeqCst);
+            let _ = cmd_tx.send(Cmd::SetSunshineAware(on));
         }
         ID_REFRESH => {
             let _ = cmd_tx.send(Cmd::Refresh);

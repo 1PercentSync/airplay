@@ -25,6 +25,19 @@ pub fn list_render_devices() -> Result<Vec<RenderDevice>> {
     windows_enum::list_render_devices()
 }
 
+/// Same pick order as WASAPI capture: id, name substring, Steam Speakers, default.
+#[cfg(windows)]
+pub fn pick_render_device_id(hint: Option<&str>) -> Result<String> {
+    windows_enum::pick_render_device_id(hint)
+}
+
+#[cfg(not(windows))]
+pub fn pick_render_device_id(_hint: Option<&str>) -> Result<String> {
+    Err(Error::Audio(
+        "WASAPI enumeration is Windows-only (build and run on Windows)".into(),
+    ))
+}
+
 #[cfg(windows)]
 pub(crate) fn imm_friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> String {
     windows_enum::imm_friendly_name(device)
@@ -38,7 +51,7 @@ mod windows_enum {
     use airplay_core::{Error, Result};
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Media::Audio::{
-        eRender, IAudioClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+        eConsole, eRender, IAudioClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
         DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
     };
     use windows::Win32::System::Com::{
@@ -48,6 +61,53 @@ mod windows_enum {
 
     pub fn list_render_devices() -> Result<Vec<RenderDevice>> {
         unsafe { list_render_devices_inner() }
+    }
+
+    pub fn pick_render_device_id(hint: Option<&str>) -> Result<String> {
+        let list = list_render_devices()?;
+        if let Some(h) = hint.filter(|s| !s.is_empty()) {
+            if let Some(d) = list.iter().find(|d| d.id == h) {
+                return Ok(d.id.clone());
+            }
+            let h_l = h.to_ascii_lowercase();
+            if let Some(d) = list
+                .iter()
+                .find(|d| d.friendly_name.to_ascii_lowercase().contains(&h_l))
+            {
+                return Ok(d.id.clone());
+            }
+            return Err(Error::Audio(format!("no render device matching {h}")));
+        }
+        if let Some(d) = list.iter().find(|d| {
+            d.friendly_name
+                .to_ascii_lowercase()
+                .contains("steam streaming speakers")
+        }) {
+            return Ok(d.id.clone());
+        }
+        unsafe { default_render_id() }
+    }
+
+    unsafe fn default_render_id() -> Result<String> {
+        CoInitializeEx(None, COINIT_MULTITHREADED)
+            .ok()
+            .map_err(|e| Error::Audio(format!("CoInitializeEx: {e}")))?;
+        let result = (|| {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|e| Error::Audio(format!("MMDeviceEnumerator: {e}")))?;
+            let device = enumerator
+                .GetDefaultAudioEndpoint(eRender, eConsole)
+                .map_err(|e| Error::Audio(format!("GetDefaultAudioEndpoint: {e}")))?;
+            let id_pwstr = device
+                .GetId()
+                .map_err(|e| Error::Audio(format!("GetId: {e}")))?;
+            let id = id_pwstr.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(id_pwstr.0 as *const core::ffi::c_void as *mut _));
+            Ok(id)
+        })();
+        CoUninitialize();
+        result
     }
 
     unsafe fn list_render_devices_inner() -> Result<Vec<RenderDevice>> {

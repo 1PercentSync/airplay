@@ -19,7 +19,7 @@ impl SampleRing {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(VecDeque::new()),
-            max: Mutex::new(48000 * 2 * 256 / 1000),
+            max: Mutex::new(48000 * 2 * 64 / 1000),
             rate: AtomicU32::new(0),
             disc: AtomicU64::new(0),
             drops: AtomicU64::new(0),
@@ -38,7 +38,7 @@ impl SampleRing {
 
     pub fn set_format(&self, rate: u32) {
         self.rate.store(rate, Ordering::SeqCst);
-        let cap = (rate as usize) * 2 * 256 / 1000;
+        let cap = (rate as usize) * 2 * 64 / 1000;
         *self.max.lock().unwrap() = cap.max(1024);
     }
 

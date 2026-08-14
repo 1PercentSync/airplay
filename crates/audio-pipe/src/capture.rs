@@ -161,6 +161,14 @@ mod windows_cap {
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| Error::Audio(format!("MMDeviceEnumerator: {e}")))?;
         let device = pick_device(&enumerator, hint)?;
+        let id_pwstr = device
+            .GetId()
+            .map_err(|e| Error::Audio(format!("GetId: {e}")))?;
+        let id = id_pwstr.to_string().unwrap_or_default();
+        CoTaskMemFree(Some(id_pwstr.0 as *const core::ffi::c_void as *mut _));
+        let mut device = enumerator
+            .GetDevice(&HSTRING::from(id.as_str()))
+            .unwrap_or(device);
         let mut announced = false;
         loop {
             if stop.load(Ordering::SeqCst) {
@@ -182,6 +190,11 @@ mod windows_cap {
                     }
                     tracing::error!("WASAPI reinit: {e}");
                     thread::sleep(Duration::from_millis(200));
+                    if let Ok(d) = enumerator.GetDevice(&HSTRING::from(id.as_str())) {
+                        device = d;
+                    } else if let Ok(d) = pick_device(&enumerator, hint) {
+                        device = d;
+                    }
                 }
             }
         }
