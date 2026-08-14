@@ -18,6 +18,9 @@ pub struct Config {
     pub autostart: bool,
     pub latency_frames: u32,
     pub api_port: u16,
+    /// Default render device remembered when entering HomePod mode via
+    /// the hotkey; restored when leaving. Empty = none remembered.
+    pub hotkey_previous_device: String,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -62,6 +65,12 @@ impl Default for ApiFile {
     }
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct HotkeyFile {
+    #[serde(default)]
+    previous_device: String,
+}
+
 #[derive(Serialize, Deserialize)]
 struct FileCfg {
     #[serde(default)]
@@ -72,6 +81,8 @@ struct FileCfg {
     stream: StreamFile,
     #[serde(default)]
     api: ApiFile,
+    #[serde(default)]
+    hotkey: HotkeyFile,
     #[serde(default = "default_volume")]
     volume: f64,
     #[serde(default)]
@@ -110,6 +121,7 @@ impl Default for Config {
             autostart: false,
             latency_frames: LATENCY_FRAMES,
             api_port: default_api_port(),
+            hotkey_previous_device: String::new(),
         }
     }
 }
@@ -140,6 +152,7 @@ impl Config {
                     } else {
                         f.api.port
                     },
+                    hotkey_previous_device: f.hotkey.previous_device,
                 },
                 Err(_) => Self::default(),
             },
@@ -162,6 +175,9 @@ impl Config {
             },
             api: ApiFile {
                 port: self.api_port,
+            },
+            hotkey: HotkeyFile {
+                previous_device: self.hotkey_previous_device.clone(),
             },
             volume: self.volume.clamp(0.0, 1.0),
             play: self.play,

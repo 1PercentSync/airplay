@@ -43,6 +43,19 @@ pub(crate) fn imm_friendly_name(device: &windows::Win32::Media::Audio::IMMDevice
     windows_enum::imm_friendly_name(device)
 }
 
+/// Endpoint id of the current default render device (eConsole role).
+#[cfg(windows)]
+pub fn default_render_device_id() -> Result<String> {
+    unsafe { windows_enum::default_render_id() }
+}
+
+#[cfg(not(windows))]
+pub fn default_render_device_id() -> Result<String> {
+    Err(Error::Audio(
+        "WASAPI enumeration is Windows-only (build and run on Windows)".into(),
+    ))
+}
+
 /// [evidence: Sunshine audio.cpp:1119-1146 GetId/FriendlyName;
 /// Sunshine audio.cpp:373 GetMixFormat; tools/audio.cpp:163-227, 276-307]
 #[cfg(windows)]
@@ -88,7 +101,7 @@ mod windows_enum {
         unsafe { default_render_id() }
     }
 
-    unsafe fn default_render_id() -> Result<String> {
+    pub(super) unsafe fn default_render_id() -> Result<String> {
         CoInitializeEx(None, COINIT_MULTITHREADED)
             .ok()
             .map_err(|e| Error::Audio(format!("CoInitializeEx: {e}")))?;

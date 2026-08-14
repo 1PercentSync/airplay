@@ -19,6 +19,9 @@ use tracing::{error, info, warn};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, VK_H,
+};
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NOTIFYICONDATAW,
@@ -29,7 +32,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RegisterClassW, SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu, TranslateMessage,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, IDI_APPLICATION, MF_CHECKED,
     MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG, TPM_RIGHTBUTTON, WINDOW_EX_STYLE,
-    WM_APP, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    WM_APP, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    WS_OVERLAPPEDWINDOW,
 };
 
 const WM_TRAY: u32 = WM_APP + 1;
@@ -43,6 +47,8 @@ const ID_VOL_BASE: u16 = 1100;
 const ID_DEV_BASE: u16 = 1200;
 const ID_CAP_BASE: u16 = 1300;
 const ID_LAT_BASE: u16 = 1400;
+/// Ctrl+Alt+H toggles HomePod mode (default device switch + stream).
+const HOTKEY_ID: i32 = 0xA1;
 
 enum Cmd {
     Start,
@@ -53,6 +59,7 @@ enum Cmd {
     SetSunshineAware(bool),
     SetAutostart(bool),
     SetLatency(u32),
+    ToggleHomePod,
     Refresh,
     Quit,
 }
@@ -70,6 +77,8 @@ struct Shared {
     latency_frames: Mutex<u32>,
     api: Arc<crate::api::ApiState>,
     api_port: u16,
+    /// Default render device id remembered on entering HomePod mode.
+    prev_default: Mutex<String>,
     running: AtomicBool,
     tooltip: Mutex<String>,
 }
@@ -92,6 +101,7 @@ pub fn run() -> Result<()> {
             cfg.latency_frames,
         )),
         api_port: cfg.api_port,
+        prev_default: Mutex::new(cfg.hotkey_previous_device.clone()),
         running: AtomicBool::new(false),
         tooltip: Mutex::new("airplay: idle".into()),
     });
@@ -226,6 +236,63 @@ async fn worker(shared: Arc<Shared>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                             warn!("autostart: {e}");
                         } else {
                             info!(on, "Start with Windows");
+                        }
+                    }
+                    Cmd::ToggleHomePod => {
+                        let hint = shared.capture.lock().unwrap().clone();
+                        let hint = if hint.is_empty() {
+                            None
+                        } else {
+                            Some(hint.as_str())
+                        };
+                        // Same device resolution as capture; compare with the
+                        // live default to decide the direction.
+                        let resolved = audio_pipe::pick_render_device_id(hint)
+                            .and_then(|cid| {
+                                audio_pipe::default_render_device_id().map(|cur| (cid, cur))
+                            });
+                        match &resolved {
+                            Ok((capture_id, cur)) => {
+                                info!(capture = %capture_id, current = %cur, "hotkey toggle");
+                            }
+                            Err(_) => {}
+                        }
+                        match resolved {
+                            Ok((capture_id, cur)) if cur == capture_id => {
+                                // Leaving HomePod mode: restore the remembered
+                                // default device, then stop streaming.
+                                let prev =
+                                    std::mem::take(&mut *shared.prev_default.lock().unwrap());
+                                if !prev.is_empty() {
+                                    if let Err(e) = audio_pipe::set_default_render_device(&prev) {
+                                        warn!("restore default device: {e}");
+                                    }
+                                }
+                                shared.play_wanted.store(false, Ordering::SeqCst);
+                                hang = false;
+                                save_cfg(&shared);
+                                stop_session(&shared, &slot, &mut session_task).await;
+                                info!("hotkey: left HomePod mode");
+                            }
+                            Ok((capture_id, cur)) => {
+                                // Entering HomePod mode: remember the current
+                                // default, switch to the capture endpoint, start.
+                                if let Err(e) = audio_pipe::set_default_render_device(&capture_id)
+                                {
+                                    // Audio would never reach the capture
+                                    // endpoint; do not start a silent stream.
+                                    warn!("switch default device: {e}");
+                                } else {
+                                    *shared.prev_default.lock().unwrap() = cur;
+                                    shared.play_wanted.store(true, Ordering::SeqCst);
+                                    hang = false;
+                                    save_cfg(&shared);
+                                    begin_session(&shared, &slot, &reconnect, &mut session_task)
+                                        .await;
+                                    info!("hotkey: entered HomePod mode");
+                                }
+                            }
+                            Err(e) => warn!("hotkey: resolve devices: {e}"),
                         }
                     }
                     Cmd::SetLatency(frames) => {
@@ -376,6 +443,7 @@ fn save_cfg(shared: &Shared) {
         autostart: shared.autostart.load(Ordering::SeqCst),
         latency_frames: *shared.latency_frames.lock().unwrap(),
         api_port: shared.api_port,
+        hotkey_previous_device: shared.prev_default.lock().unwrap().clone(),
     };
     if let Err(e) = cfg.save() {
         warn!("save config: {e}");
@@ -429,6 +497,10 @@ unsafe fn message_loop(
     write_tip(&mut nid, "airplay: idle");
     Shell_NotifyIconW(NIM_ADD, &nid).ok()?;
 
+    if let Err(e) = RegisterHotKey(Some(hwnd), HOTKEY_ID, MOD_CONTROL | MOD_ALT, VK_H.0 as u32) {
+        warn!("register Ctrl+Alt+H hotkey: {e}");
+    }
+
     let mut msg = MSG::default();
     while GetMessageW(&mut msg, None, 0, 0).as_bool() {
         let tip = shared.tooltip.lock().unwrap().clone();
@@ -438,6 +510,7 @@ unsafe fn message_loop(
         DispatchMessageW(&msg);
     }
 
+    let _ = UnregisterHotKey(Some(hwnd), HOTKEY_ID);
     let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
     let _ = DestroyWindow(hwnd);
     Ok(())
@@ -468,8 +541,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     let pair = &*(ptr as *const (Arc<Shared>, mpsc::UnboundedSender<Cmd>));
     let (shared, cmd_tx) = pair;
 
-    if msg == WM_TRAY && lparam.0 as u32 == WM_RBUTTONUP {
+    if msg == WM_TRAY && (lparam.0 as u32 == WM_RBUTTONUP || lparam.0 as u32 == WM_LBUTTONUP) {
         show_menu(hwnd, shared, cmd_tx);
+        return LRESULT(0);
+    }
+    if msg == WM_HOTKEY && wparam.0 as i32 == HOTKEY_ID {
+        let _ = cmd_tx.send(Cmd::ToggleHomePod);
         return LRESULT(0);
     }
     if msg == WM_COMMAND {
