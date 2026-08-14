@@ -17,13 +17,17 @@ timestamps; the extension shifts the video `SourceBuffer` timeline by
 - `inject.js` (MAIN world, document_start) hooks
   `MediaSource.prototype.addSourceBuffer`; every video `SourceBuffer`
   (including the ones bilibili recreates on quality change) gets
-  `timestampOffset = (lead_ms + userOffsetMs) / 1000` while `delay` is
-  true, else 0.
+  `timestampOffset = delay × playbackRate` while `delay` is true, else 0.
+  The rate factor matters: timestampOffset lives on the media timeline,
+  which flows at playbackRate × wall clock, while the HomePod lead is
+  wall-clock. Rate changes re-apply the offset (no buffer surgery —
+  bilibili never re-appends consumed ranges, and removing them makes
+  Chromium gap-jump, skipping audio too).
 
 Measured on bilibili (AV1/AAC DASH): no stalls, no dropped frames, seeks
-recover normally. Seeking back to 0 skips the first `delay` of audio
-(Chromium aligns audio to the first video frame) — negligible at real
-offsets (~120 ms).
+recover normally, 0.5x/2x rate changes apply cleanly in both directions.
+Seeking back to 0 skips the first `delay` of audio (Chromium aligns
+audio to the first video frame) — negligible at real offsets (~120 ms).
 
 ## Install
 
